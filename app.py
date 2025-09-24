@@ -214,9 +214,9 @@ def tier_costs_usd(gfi_g_per_MJ: float, total_MJ: float, year: int) -> Tuple[flo
 def optimize_energy_neutral(
     fi: FuelInputs,
     year: int,
-    coarse_steps: int = 50,
-    fine_window: float = 0.04,
-    fine_step: float = 0.005,
+    coarse_steps: int = 200,
+    fine_window: float = 0.02,
+    fine_step: float = 0.001,
 ) -> Tuple[float, float, float, float, float]:
     """Per‑year optimization.
 
