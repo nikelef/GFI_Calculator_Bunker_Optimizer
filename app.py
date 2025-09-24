@@ -1,40 +1,15 @@
 # app.py — GFI Bunkering Optimizer (Single Vessel)
 # ------------------------------------------------
-# A self‑contained Streamlit web app that turns your original Excel‑based logic
-# into a user‑friendly tool for a *single vessel*.
+# Updated to match the revised output spec:
+#  - Regulatory Cost = Tier1 + Tier2 + Benefit (from INITIAL GFI, not optimized)
+#  - Premium Fuel Cost = Premium × Other_Fuel_Increase_For_Opt_Cost_<year> (increase vs initial Others)
+#  - Total Cost = Regulatory Cost + Premium Fuel Cost
 #
-# Key features
-# • Inputs (persisted between runs):
-#   - Fuel quantities [tons] for HFO (Cf:3.114), LFO (Cf:3.151), MDO/MGO (Cf:3.206), Others (Cf:—)
-#   - WtW intensities [gCO2eq/MJ] for each fuel
-#   - LCVs [MJ/ton] for each fuel (NOTE: original logic used ton-based mass)
-#   - Premium [USD/ton] = (Others price – HFO price)
-# • Outputs for 2028–2035:
-#   - GFI (gCO2eq/MJ) + plot vs. Base/Direct targets + baseline
-#   - GFI_Deficit_Surplus_year [tCO2eq]
-#   - GFI_Tier_1_Cost_year [USD]
-#   - GFI_Tier_2_Cost_year [USD]
-#   - GFI_Benefit_year [USD]
-#   - HFO_Reduction_For_Opt_Cost_year [tons]
-#   - Other_Fuel_Increase_For_Opt_Cost_year [tons]
-#   - Regulatory Cost = Tier1 + Tier2 + Benefit (benefit can be negative)
-#   - Premium Fuel Cost = Premium × Other_Fuel_Increase_For_Opt_Cost_year
-#   - Total Optimized Cost = Regulatory Cost + Premium Fuel Cost
-# • Energy‑neutral optimization per YEAR: reduce HFO, increase Others so total
-#   fuel MJ stays constant; objective = min(RegulatoryCost + PremiumCost).
-# • Export results to Excel; all constants match your original script.
-#
-# How to run
-#   1) pip install streamlit plotly pandas openpyxl
-#   2) streamlit run app.py
-#
-# Notes
-# - All constants (GFI2008, ZT_Base, ZT_Direct, Tier rates) match your original code.
-# - Units are enforced to be consistent with the original math:
-#     * LCV: MJ/ton
-#     * WtW: gCO2eq/MJ
-#     * Mass: tons
-#   This way, (g/MJ)×(MJ) → gCO2eq; we convert to tCO2eq by ÷1e6.
+# Inputs persisted; defaults set to your requested values.
+# Units:
+#   Mass: tons
+#   LCV:  MJ/ton  (your MJ/g defaults have been converted ×1000)
+#   WtW:  gCO2eq/MJ
 
 from __future__ import annotations
 
@@ -50,40 +25,21 @@ import plotly.express as px
 import streamlit as st
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Constants (kept as per original code)
+# Constants (aligned to the original model)
 # ──────────────────────────────────────────────────────────────────────────────
-GFI2008 = 93.3  # gCO2eq/MJ (baseline intensity)
-ZT_BASE = {
-    2028: 4.0,
-    2029: 6.0,
-    2030: 8.0,
-    2031: 12.4,
-    2032: 16.8,
-    2033: 21.2,
-    2034: 25.6,
-    2035: 30.0,
-}
-ZT_DIRECT = {
-    2028: 17.0,
-    2029: 19.0,
-    2030: 21.0,
-    2031: 25.4,
-    2032: 29.8,
-    2033: 34.2,
-    2034: 38.6,
-    2035: 43.0,
-}
+GFI2008 = 93.3  # gCO2eq/MJ
+ZT_BASE = {2028: 4.0, 2029: 6.0, 2030: 8.0, 2031: 12.4, 2032: 16.8, 2033: 21.2, 2034: 25.6, 2035: 30.0}
+ZT_DIRECT = {2028: 17.0, 2029: 19.0, 2030: 21.0, 2031: 25.4, 2032: 29.8, 2033: 34.2, 2034: 38.6, 2035: 43.0}
 YEARS = list(range(2028, 2036))
 
 # Cost rates (USD per tCO2eq)
 TIER1_COST = 100.0
 TIER2_COST = 380.0
-BENEFIT_RATE = 380.0  # negative mass → negative $ (benefit/credit)
+BENEFIT_RATE = 380.0  # negative mass → negative $, credit
 
-# Default persistence file
+# Persistence
 DEFAULTS_PATH = ".gfi_bunkering_defaults.json"
 
-# Labels (Cf just for UI display)
 CF_LABELS = {
     "HFO": "HFO (Cf: 3.114)",
     "LFO": "LFO (Cf: 3.151)",
@@ -91,31 +47,28 @@ CF_LABELS = {
     "OTH": "Others (Cf: —)",
 }
 
+# Targets as absolute g/MJ
+GFI_BASE = {yr: (1 - ZT_BASE[yr] / 100.0) * GFI2008 for yr in YEARS}
+GFI_DIRECT = {yr: (1 - ZT_DIRECT[yr] / 100.0) * GFI2008 for yr in YEARS}
+
 # ──────────────────────────────────────────────────────────────────────────────
-# Data models & utils
+# Data model
 # ──────────────────────────────────────────────────────────────────────────────
 @dataclass
 class FuelInputs:
-    # Masses in tons
     HFO_t: float
     LFO_t: float
     MDO_t: float
     OTH_t: float
-
-    # WtW in gCO2eq/MJ
     WtW_HFO: float
     WtW_LFO: float
     WtW_MDO: float
     WtW_OTH: float
-
-    # LCV in MJ/ton
-    LCV_HFO: float
+    LCV_HFO: float  # MJ/ton
     LCV_LFO: float
     LCV_MDO: float
     LCV_OTH: float
-
-    # Premium USD/ton (Others − HFO)
-    PREMIUM: float
+    PREMIUM: float  # USD/ton
 
     def total_MJ(self) -> float:
         return (
@@ -135,9 +88,12 @@ class FuelInputs:
             + self.MDO_t * self.LCV_MDO * self.WtW_MDO
             + self.OTH_t * self.LCV_OTH * self.WtW_OTH
         )
-        return num_g / mj  # gCO2eq/MJ
+        return num_g / mj  # g/MJ
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Helpers for persisted defaults
+# ──────────────────────────────────────────────────────────────────────────────
 def load_defaults() -> Dict:
     try:
         with open(DEFAULTS_PATH, "r", encoding="utf-8") as f:
@@ -154,44 +110,31 @@ def save_defaults(dct: Dict) -> None:
         pass
 
 
-# Targets
-GFI_BASE = {yr: (1 - ZT_BASE[yr] / 100.0) * GFI2008 for yr in YEARS}
-GFI_DIRECT = {yr: (1 - ZT_DIRECT[yr] / 100.0) * GFI2008 for yr in YEARS}
-
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Core calculations
 # ──────────────────────────────────────────────────────────────────────────────
-
 def deficit_surplus_tCO2eq(gfi_g_per_MJ: float, total_MJ: float, year: int) -> float:
-    """Return GFI_Deficit_Surplus_year in tCO2eq.
-    Sign convention:
-      • above Direct → positive deficit (cost exposure)
-      • below Direct → negative (surplus/credit)
-    """
+    """Return GFI_Deficit_Surplus_<year> in tCO2eq (positive=deficit, negative=surplus)."""
     base = GFI_BASE[year]
     direct = GFI_DIRECT[year]
 
     if gfi_g_per_MJ > base:
         tier2 = gfi_g_per_MJ - base
         tier1 = base - direct
-        g_g = (tier1 + tier2) * total_MJ  # grams
+        g_g = (tier1 + tier2) * total_MJ
     elif gfi_g_per_MJ >= direct:
         g_g = (gfi_g_per_MJ - direct) * total_MJ
     else:
         g_g = (gfi_g_per_MJ - direct) * total_MJ  # negative
 
-    return g_g / 1e6  # → tonnes CO2eq
+    return g_g / 1e6  # grams → tonnes
 
 
 def tier_costs_usd(gfi_g_per_MJ: float, total_MJ: float, year: int) -> Tuple[float, float, float]:
-    """Return (Tier1 USD, Tier2 USD, Benefit USD) for the year.
-    Benefit is negative if below Direct.
-    """
+    """Return (Tier1 USD, Tier2 USD, Benefit USD) from INITIAL (pre-optimization) GFI."""
     base = GFI_BASE[year]
     direct = GFI_DIRECT[year]
 
-    # masses in tonnes
     if gfi_g_per_MJ > base:
         tier1_mt = (base - direct) * total_MJ / 1e6
         tier2_mt = (gfi_g_per_MJ - base) * total_MJ / 1e6
@@ -205,10 +148,7 @@ def tier_costs_usd(gfi_g_per_MJ: float, total_MJ: float, year: int) -> Tuple[flo
         tier2_mt = 0.0
         benefit_mt = (gfi_g_per_MJ - direct) * total_MJ / 1e6  # negative
 
-    t1_usd = tier1_mt * TIER1_COST
-    t2_usd = tier2_mt * TIER2_COST
-    ben_usd = benefit_mt * BENEFIT_RATE  # negative → credit
-    return t1_usd, t2_usd, ben_usd
+    return tier1_mt * TIER1_COST, tier2_mt * TIER2_COST, benefit_mt * BENEFIT_RATE
 
 
 def optimize_energy_neutral(
@@ -218,34 +158,25 @@ def optimize_energy_neutral(
     fine_window: float = 0.04,
     fine_step: float = 0.005,
 ) -> Tuple[float, float, float, float, float]:
-    """Per‑year optimization.
-
+    """Energy-neutral HFO→Others swap, per year.
     Returns: (hfo_red_t, oth_inc_t, gfi_new, reg_cost_usd, premium_cost_usd)
-    
-    Strategy:
-      - Reduce a fraction f ∈ [0,1] of original HFO mass.
-      - Add Others to keep total MJ constant: ΔOTH = (ΔHFO * LCV_HFO) / LCV_OTH.
-      - Compute GFI, then Tier costs for *this* year.
-      - Premium cost = max(ΔOTH, 0) × PREMIUM (only pay extra for added Others).
-      - Choose f that minimizes (Tier1 + Tier2 + Benefit + PremiumCost).
+
+    - Reduce HFO by a fraction f of its initial mass.
+    - Increase Others by ΔOTH = (ΔHFO * LCV_HFO) / LCV_OTH (keeps total MJ constant).
+    - Compute GFI_new and Tier costs for that year.
+    - Regulatory cost here is for the *post-swap* GFI; we DO NOT use it in 'Regulatory Cost' output.
+    - Premium cost = PREMIUM × max(ΔOTH, 0) with ΔOTH measured vs initial Others.
     """
     if fi.HFO_t <= 0 or fi.LCV_OTH <= 0:
         return 0.0, 0.0, fi.gfi(), 0.0, 0.0
 
-    # Baseline
     total_MJ0 = fi.total_MJ()
-    gfi0 = fi.gfi()
-    t1_0, t2_0, ben_0 = tier_costs_usd(gfi0, total_MJ0, year)
-    base_reg_cost = t1_0 + t2_0 + ben_0
 
-    def total_cost_for_fraction(f: float) -> Tuple[float, float, float, float, float]:
+    def eval_fraction(f: float) -> Tuple[float, float, float, float, float]:
         hfo_new = fi.HFO_t * (1.0 - f)
         d_hfo = fi.HFO_t - hfo_new
         oth_new = fi.OTH_t + (d_hfo * fi.LCV_HFO) / fi.LCV_OTH
 
-        # New GFI using same total MJ (by construction it's unchanged):
-        # Actually total MJ is preserved by the energy‑neutral swap, but we
-        # recompute for completeness/numerical safety.
         total_MJ = (
             hfo_new * fi.LCV_HFO
             + fi.LFO_t * fi.LCV_LFO
@@ -253,8 +184,9 @@ def optimize_energy_neutral(
             + oth_new * fi.LCV_OTH
         )
         if total_MJ <= 0:
-            return np.inf, gfi0, 0.0, 0.0, 0.0
+            return np.inf, 0.0, 0.0, 0.0, 0.0
 
+        # New GFI
         num_g = (
             hfo_new * fi.LCV_HFO * fi.WtW_HFO
             + fi.LFO_t * fi.LCV_LFO * fi.WtW_LFO
@@ -263,33 +195,33 @@ def optimize_energy_neutral(
         )
         gfi_new = num_g / total_MJ
 
-        t1, t2, ben = tier_costs_usd(gfi_new, total_MJ, year)
-        premium_cost = max(oth_new - fi.OTH_t, 0.0) * fi.PREMIUM
-        reg_cost = t1 + t2 + ben
-        total_cost = reg_cost + premium_cost
-        return total_cost, gfi_new, reg_cost, premium_cost, d_hfo
+        # Post-swap tier costs (used only for internal optimization objective)
+        t1_usd, t2_usd, ben_usd = tier_costs_usd(gfi_new, total_MJ, year)
+        reg_cost_usd = t1_usd + t2_usd + ben_usd
+        premium_cost_usd = max(oth_new - fi.OTH_t, 0.0) * fi.PREMIUM
+        total_cost = reg_cost_usd + premium_cost_usd
+        return total_cost, gfi_new, reg_cost_usd, premium_cost_usd, d_hfo
 
-    # Coarse sweep over f ∈ {0, 1/coarse_steps, ..., 1}
+    # Coarse sweep
     grid = np.linspace(0.0, 1.0, coarse_steps + 1)
     best = None
     for f in grid:
-        tot, gfi_new, reg, prem, d_hfo = total_cost_for_fraction(f)
+        tot, gfi_new, reg, prem, d_hfo = eval_fraction(f)
         if best is None or tot < best[0]:
             best = (tot, f, gfi_new, reg, prem, d_hfo)
 
     _, f_best, gfi_best, reg_best, prem_best, d_hfo_best = best
 
-    # Fine local search around f_best
+    # Fine sweep near best
     lo = max(0.0, f_best - fine_window)
     hi = min(1.0, f_best + fine_window)
     f = lo
     while f <= hi + 1e-12:
-        tot, gfi_new, reg, prem, d_hfo = total_cost_for_fraction(f)
-        if tot < (reg_best + prem_best) - 1e-12:
+        tot, gfi_new, reg, prem, d_hfo = eval_fraction(f)
+        if tot < reg_best + prem_best - 1e-12:
             f_best, gfi_best, reg_best, prem_best, d_hfo_best = f, gfi_new, reg, prem, d_hfo
         f += fine_step
 
-    # Final masses deltas
     hfo_red = d_hfo_best
     oth_inc = (hfo_red * fi.LCV_HFO) / fi.LCV_OTH if fi.LCV_OTH > 0 else 0.0
     return hfo_red, oth_inc, gfi_best, reg_best, prem_best
@@ -304,28 +236,24 @@ st.title("GFI Bunkering Optimizer — Single Vessel")
 with st.expander("Methodology & Units", expanded=False):
     st.markdown(
         """
-        **Formulas (as in your original code):**
-        
-        - **GFI** \[gCO₂e/MJ] = \(\sum_i m_i·LCV_i·WtW_i\) / \(\sum_i m_i·LCV_i\)
-        - **Deficit/Surplus** \[tCO₂e] for year *y*:
-            - If GFI > Base_y: (GFI−Base_y + Base_y−Direct_y)·TotalMJ / 10⁶
-            - If Direct_y ≤ GFI ≤ Base_y: (GFI−Direct_y)·TotalMJ / 10⁶
-            - If GFI < Direct_y: (GFI−Direct_y)·TotalMJ / 10⁶ (negative surplus)
-        - **Tier costs** \[USD]: Tier‑1 = 100, Tier‑2 = 380, Benefit = 380 × (negative mass)
-        - **Optimization (per year):** reduce **HFO** by Δ (tons) and increase **Others** by
-          Δ·LCV_HFO/LCV_OTH (energy‑neutral). Objective: minimize
-          *(Tier1 + Tier2 + Benefit + Premium·max(ΔOTH,0))*.
-        
-        **Units**: Mass in tons; LCV in MJ/ton; WtW in gCO₂e/MJ.
+**Formulas (as in original):**
+
+- **GFI** \[gCO₂e/MJ] = \( \sum m_i·LCV_i·WtW_i \) / \( \sum m_i·LCV_i \)  
+- **Deficit/Surplus** \[tCO₂e] for year *y*:
+  - If GFI > Base_y: (GFI−Base_y + Base_y−Direct_y)·TotalMJ / 10⁶
+  - If Direct_y ≤ GFI ≤ Base_y: (GFI−Direct_y)·TotalMJ / 10⁶
+  - If GFI < Direct_y: (GFI−Direct_y)·TotalMJ / 10⁶ (negative = surplus)
+- **Tier rates**: Tier-1 = 100, Tier-2 = 380, Benefit = 380 (USD per tCO₂e)
+- **Optimization (per year)**: energy-neutral HFO→Others swap; objective = Tier costs (post-swap) + Premium×ΔOthers.  
+  *Outputs “Regulatory Cost”, “Premium Fuel Cost”, “Total Cost” use the initial (pre-optimization) Tier costs and the ΔOthers vs initial.*
         """
     )
 
-# Load persisted defaults (first)
+# Load persisted defaults
 states = load_defaults()
 
-# Sidebar inputs — grouped
+# Sidebar inputs (defaults set to your requested values; editable)
 st.sidebar.header("Inputs (persisted)")
-
 colA, colB = st.sidebar.columns(2)
 HFO_t = colA.number_input(f"{CF_LABELS['HFO']} — Tons", min_value=0.0, value=float(states.get("HFO_t", 100.0)), step=0.1)
 LFO_t = colB.number_input(f"{CF_LABELS['LFO']} — Tons", min_value=0.0, value=float(states.get("LFO_t", 0.0)), step=0.1)
@@ -341,25 +269,25 @@ WtW_OTH = colD.number_input("WtW Others [gCO₂e/MJ]", min_value=0.0, value=floa
 
 st.sidebar.markdown("---")
 colE, colF = st.sidebar.columns(2)
+# Convert your MJ/g defaults to MJ/ton (×1000) for the engine
 LCV_HFO = colE.number_input("LCV HFO [MJ/ton]", min_value=0.0, value=float(states.get("LCV_HFO", 40200.0)), step=100.0)
 LCV_LFO = colF.number_input("LCV LFO [MJ/ton]", min_value=0.0, value=float(states.get("LCV_LFO", 41000.0)), step=100.0)
 LCV_MDO = colE.number_input("LCV MDO/MGO [MJ/ton]", min_value=0.0, value=float(states.get("LCV_MDO", 42700.0)), step=100.0)
 LCV_OTH = colF.number_input("LCV Others [MJ/ton]", min_value=0.0, value=float(states.get("LCV_OTH", 37000.0)), step=100.0)
 
 st.sidebar.markdown("---")
-PREMIUM = st.sidebar.number_input("Premium [USD/ton] (Others − HFO)", min_value=0.0, value=float(states.get("PREMIUM", 305.0)), step=10.0)
+PREMIUM = st.sidebar.number_input("Premium [USD/ton] (Others − HFO)", min_value=0.0, value=float(states.get("PREMIUM", 305.0)), step=5.0)
 
 if st.sidebar.button("Save as defaults", use_container_width=True):
-    new_states = {
+    save_defaults({
         "HFO_t": HFO_t, "LFO_t": LFO_t, "MDO_t": MDO_t, "OTH_t": OTH_t,
         "WtW_HFO": WtW_HFO, "WtW_LFO": WtW_LFO, "WtW_MDO": WtW_MDO, "WtW_OTH": WtW_OTH,
         "LCV_HFO": LCV_HFO, "LCV_LFO": LCV_LFO, "LCV_MDO": LCV_MDO, "LCV_OTH": LCV_OTH,
         "PREMIUM": PREMIUM,
-    }
-    save_defaults(new_states)
+    })
     st.sidebar.success("Defaults saved.")
 
-# Build FuelInputs
+# Build inputs object
 fi = FuelInputs(
     HFO_t=HFO_t, LFO_t=LFO_t, MDO_t=MDO_t, OTH_t=OTH_t,
     WtW_HFO=WtW_HFO, WtW_LFO=WtW_LFO, WtW_MDO=WtW_MDO, WtW_OTH=WtW_OTH,
@@ -368,16 +296,16 @@ fi = FuelInputs(
 )
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Calculate base metrics
+# Base metrics
 # ──────────────────────────────────────────────────────────────────────────────
 TOTAL_MJ = fi.total_MJ()
 GFI = fi.gfi()
 
-kpi1, kpi2 = st.columns(2)
-kpi1.metric("GFI (gCO₂e/MJ)", f"{GFI:.3f}")
-kpi2.metric("Total energy (MJ)", f"{TOTAL_MJ:,.0f}")
+k1, k2 = st.columns(2)
+k1.metric("GFI (gCO₂e/MJ)", f"{GFI:.3f}")
+k2.metric("Total energy (MJ)", f"{TOTAL_MJ:,.0f}")
 
-# GFI plot vs targets
+# 1) GFI plot vs Base/Direct/Baseline
 fig = go.Figure()
 fig.add_trace(go.Scatter(x=YEARS, y=[GFI]*len(YEARS), mode="lines", name="GFI attained", line=dict(width=3)))
 fig.add_trace(go.Scatter(x=YEARS, y=[GFI_BASE[y] for y in YEARS], mode="lines", name="Base target", line=dict(dash="dash")))
@@ -386,45 +314,83 @@ fig.add_trace(go.Scatter(x=YEARS, y=[GFI2008]*len(YEARS), mode="lines", name="Ba
 fig.update_layout(height=360, margin=dict(l=10,r=10,t=40,b=10), yaxis_title="gCO₂e/MJ", xaxis_title="Year")
 st.plotly_chart(fig, use_container_width=True)
 
-# Per‑year tables and bars
+# ──────────────────────────────────────────────────────────────────────────────
+# Per-year outputs
+# ──────────────────────────────────────────────────────────────────────────────
 rows: List[Dict] = []
 for yr in YEARS:
+    # Initial (pre-optimization) quantities drive deficits & tier costs
     deficit_t = deficit_surplus_tCO2eq(GFI, TOTAL_MJ, yr)
     t1_usd, t2_usd, ben_usd = tier_costs_usd(GFI, TOTAL_MJ, yr)
-    # Optimization per year
-    hfo_red_t, oth_inc_t, gfi_new, reg_cost_opt, premium_cost_opt = optimize_energy_neutral(fi, yr)
+    regulatory_cost_usd = t1_usd + t2_usd + ben_usd  # INITIAL (as required)
+
+    # Optimization (energy-neutral HFO→Others), per year
+    hfo_red_t, oth_inc_t, gfi_new, reg_cost_post, prem_cost_post = optimize_energy_neutral(fi, yr)
+
+    # Premium Fuel Cost uses ΔOthers vs initial
+    premium_fuel_cost_usd = PREMIUM * oth_inc_t
+
+    # Total Cost per requirement
+    total_cost_usd = regulatory_cost_usd + premium_fuel_cost_usd
 
     rows.append({
         "Year": yr,
         "GFI (g/MJ)": round(GFI, 6),
+        # 2
         "GFI_Deficit_Surplus_tCO2eq": deficit_t,
+        # 3–5 (initial)
         "GFI_Tier_1_Cost_USD": t1_usd,
         "GFI_Tier_2_Cost_USD": t2_usd,
         "GFI_Benefit_USD": ben_usd,
+        # 6–7 (optimization deltas)
         "HFO_Reduction_For_Opt_Cost_t": hfo_red_t,
         "Other_Fuel_Increase_For_Opt_Cost_t": oth_inc_t,
-        "Regulatory_Cost_USD": reg_cost_opt,
-        "Premium_Fuel_Cost_USD": PREMIUM * oth_inc_t,
-        "Total_Optimized_Cost_USD": reg_cost_opt + (PREMIUM * oth_inc_t),
+        # 8–10 (as specified)
+        "Regulatory_Cost_USD": regulatory_cost_usd,
+        "Premium_Fuel_Cost_USD": premium_fuel_cost_usd,
+        "Total_Cost_USD": total_cost_usd,
+        # (optional visibility) post-swap values not used in required outputs:
+        "GFI_Optimized (info)": gfi_new,
+        "Reg_Cost_PostSwap (info)": reg_cost_post,
     })
 
 res_df = pd.DataFrame(rows)
 
-st.subheader("Per‑Year Results (2028–2035)")
-st.dataframe(res_df.style.format({
-    "GFI (g/MJ)": "{:.3f}",
-    "GFI_Deficit_Surplus_tCO2eq": "{:.3f}",
-    "GFI_Tier_1_Cost_USD": "{:,.0f}",
-    "GFI_Tier_2_Cost_USD": "{:,.0f}",
-    "GFI_Benefit_USD": "{:,.0f}",
-    "HFO_Reduction_For_Opt_Cost_t": "{:.3f}",
-    "Other_Fuel_Increase_For_Opt_Cost_t": "{:.3f}",
-    "Regulatory_Cost_USD": "{:,.0f}",
-    "Premium_Fuel_Cost_USD": "{:,.0f}",
-    "Total_Optimized_Cost_USD": "{:,.0f}",
-}), use_container_width=True, height=380)
+st.subheader("Per-Year Results (2028–2035)")
+st.dataframe(
+    res_df[
+        [
+            "Year",
+            "GFI (g/MJ)",
+            "GFI_Deficit_Surplus_tCO2eq",
+            "GFI_Tier_1_Cost_USD",
+            "GFI_Tier_2_Cost_USD",
+            "GFI_Benefit_USD",
+            "HFO_Reduction_For_Opt_Cost_t",
+            "Other_Fuel_Increase_For_Opt_Cost_t",
+            "Regulatory_Cost_USD",
+            "Premium_Fuel_Cost_USD",
+            "Total_Cost_USD",
+        ]
+    ].style.format({
+        "GFI (g/MJ)": "{:.3f}",
+        "GFI_Deficit_Surplus_tCO2eq": "{:.3f}",
+        "GFI_Tier_1_Cost_USD": "{:,.0f}",
+        "GFI_Tier_2_Cost_USD": "{:,.0f}",
+        "GFI_Benefit_USD": "{:,.0f}",
+        "HFO_Reduction_For_Opt_Cost_t": "{:.3f}",
+        "Other_Fuel_Increase_For_Opt_Cost_t": "{:.3f}",
+        "Regulatory_Cost_USD": "{:,.0f}",
+        "Premium_Fuel_Cost_USD": "{:,.0f}",
+        "Total_Cost_USD": "{:,.0f}",
+    }),
+    use_container_width=True,
+    height=400
+)
 
-# Bar charts
+# ──────────────────────────────────────────────────────────────────────────────
+# Required bar charts: 2, 8, 9, 10
+# ──────────────────────────────────────────────────────────────────────────────
 def bar_chart(title: str, ycol: str):
     figb = px.bar(res_df, x="Year", y=ycol, title=title)
     figb.update_layout(height=320, margin=dict(l=10,r=10,t=40,b=10))
@@ -432,26 +398,29 @@ def bar_chart(title: str, ycol: str):
 
 c1, c2 = st.columns(2)
 with c1:
-    bar_chart("GFI Deficit/Surplus [tCO₂e]", "GFI_Deficit_Surplus_tCO2eq")
+    bar_chart("GFI Deficit / Surplus [tCO₂e] (Item 2)", "GFI_Deficit_Surplus_tCO2eq")
 with c2:
-    bar_chart("Regulatory Cost [USD]", "Regulatory_Cost_USD")
+    bar_chart("Regulatory Cost [USD] (Item 8)", "Regulatory_Cost_USD")
 
 c3, c4 = st.columns(2)
 with c3:
-    bar_chart("Premium Fuel Cost [USD]", "Premium_Fuel_Cost_USD")
+    bar_chart("Premium Fuel Cost [USD] (Item 9)", "Premium_Fuel_Cost_USD")
 with c4:
-    bar_chart("Total Optimized Cost [USD]", "Total_Optimized_Cost_USD")
+    bar_chart("Total Cost [USD] (Item 10)", "Total_Cost_USD")
 
-# Also show Tier1, Tier2, Benefit
-c5, c6 = st.columns(2)
-with c5:
-    bar_chart("Tier 1 Cost [USD]", "GFI_Tier_1_Cost_USD")
-with c6:
-    bar_chart("Tier 2 Cost [USD]", "GFI_Tier_2_Cost_USD")
+# Optional: show Tier breakdown bars for transparency
+with st.expander("Details: Tier breakdown (initial, pre-optimization)"):
+    c5, c6, c7 = st.columns(3)
+    with c5:
+        bar_chart("Tier 1 Cost [USD]", "GFI_Tier_1_Cost_USD")
+    with c6:
+        bar_chart("Tier 2 Cost [USD]", "GFI_Tier_2_Cost_USD")
+    with c7:
+        bar_chart("Benefit [USD] (negative = credit)", "GFI_Benefit_USD")
 
-bar_chart("Benefit [USD] (negative = credit)", "GFI_Benefit_USD")
-
-# Download Excel
+# ──────────────────────────────────────────────────────────────────────────────
+# Excel export
+# ──────────────────────────────────────────────────────────────────────────────
 buf = io.BytesIO()
 with pd.ExcelWriter(buf, engine="openpyxl") as xw:
     pd.DataFrame({
@@ -468,4 +437,4 @@ st.download_button(
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
 
-st.caption("© 2025 — Single‑vessel GFI optimizer. All constants and logic aligned with your original script.")
+st.caption("© 2025 — Single-vessel GFI optimizer. Regulatory & Premium costs per your updated specification.")
