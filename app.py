@@ -24,8 +24,8 @@
 #   fuel MJ stays constant; objective = min(RegulatoryCost + PremiumCost).
 # • Export results to Excel; all constants match your original script.
 #
-# How to run locally
-#   1) pip install streamlit plotly pandas openpyxl numpy
+# How to run
+#   1) pip install streamlit plotly pandas openpyxl
 #   2) streamlit run app.py
 #
 # Notes
@@ -80,7 +80,7 @@ TIER1_COST = 100.0
 TIER2_COST = 380.0
 BENEFIT_RATE = 380.0  # negative mass → negative $ (benefit/credit)
 
-# Default persistence file (on HF Spaces this persists while the container is warm)
+# Default persistence file
 DEFAULTS_PATH = ".gfi_bunkering_defaults.json"
 
 # Labels (Cf just for UI display)
@@ -164,11 +164,11 @@ GFI_DIRECT = {yr: (1 - ZT_DIRECT[yr] / 100.0) * GFI2008 for yr in YEARS}
 # ──────────────────────────────────────────────────────────────────────────────
 
 def deficit_surplus_tCO2eq(gfi_g_per_MJ: float, total_MJ: float, year: int) -> float:
-    \"\"\"Return GFI_Deficit_Surplus_year in tCO2eq.
+    """Return GFI_Deficit_Surplus_year in tCO2eq.
     Sign convention:
       • above Direct → positive deficit (cost exposure)
       • below Direct → negative (surplus/credit)
-    \"\"\"
+    """
     base = GFI_BASE[year]
     direct = GFI_DIRECT[year]
 
@@ -185,9 +185,9 @@ def deficit_surplus_tCO2eq(gfi_g_per_MJ: float, total_MJ: float, year: int) -> f
 
 
 def tier_costs_usd(gfi_g_per_MJ: float, total_MJ: float, year: int) -> Tuple[float, float, float]:
-    \"\"\"Return (Tier1 USD, Tier2 USD, Benefit USD) for the year.
+    """Return (Tier1 USD, Tier2 USD, Benefit USD) for the year.
     Benefit is negative if below Direct.
-    \"\"\"
+    """
     base = GFI_BASE[year]
     direct = GFI_DIRECT[year]
 
@@ -218,7 +218,7 @@ def optimize_energy_neutral(
     fine_window: float = 0.04,
     fine_step: float = 0.005,
 ) -> Tuple[float, float, float, float, float]:
-    \"\"\"Per‑year optimization.
+    """Per‑year optimization.
 
     Returns: (hfo_red_t, oth_inc_t, gfi_new, reg_cost_usd, premium_cost_usd)
     
@@ -228,7 +228,7 @@ def optimize_energy_neutral(
       - Compute GFI, then Tier costs for *this* year.
       - Premium cost = max(ΔOTH, 0) × PREMIUM (only pay extra for added Others).
       - Choose f that minimizes (Tier1 + Tier2 + Benefit + PremiumCost).
-    \"\"\"
+    """
     if fi.HFO_t <= 0 or fi.LCV_OTH <= 0:
         return 0.0, 0.0, fi.gfi(), 0.0, 0.0
 
@@ -306,41 +306,28 @@ with st.expander("Methodology & Units", expanded=False):
         """
         **Formulas (as in your original code):**
         
-        - **GFI** \\[gCO₂e/MJ] = \\(\\sum_i m_i·LCV_i·WtW_i\\) / \\(\\sum_i m_i·LCV_i\\)
-        - **Deficit/Surplus** \\[tCO₂e] for year *y*:
+        - **GFI** \[gCO₂e/MJ] = \(\sum_i m_i·LCV_i·WtW_i\) / \(\sum_i m_i·LCV_i\)
+        - **Deficit/Surplus** \[tCO₂e] for year *y*:
             - If GFI > Base_y: (GFI−Base_y + Base_y−Direct_y)·TotalMJ / 10⁶
             - If Direct_y ≤ GFI ≤ Base_y: (GFI−Direct_y)·TotalMJ / 10⁶
             - If GFI < Direct_y: (GFI−Direct_y)·TotalMJ / 10⁶ (negative surplus)
-        - **Tier costs** \\[USD]: Tier‑1 = 100, Tier‑2 = 380, Benefit = 380 × (negative mass)
+        - **Tier costs** \[USD]: Tier‑1 = 100, Tier‑2 = 380, Benefit = 380 × (negative mass)
         - **Optimization (per year):** reduce **HFO** by Δ (tons) and increase **Others** by
           Δ·LCV_HFO/LCV_OTH (energy‑neutral). Objective: minimize
-          *(Tier1 + Tier2 + Benefit + Premium·max(ΔOTH,0))*.        
+          *(Tier1 + Tier2 + Benefit + Premium·max(ΔOTH,0))*.
+        
         **Units**: Mass in tons; LCV in MJ/ton; WtW in gCO₂e/MJ.
         """
     )
 
 # Load persisted defaults (first)
-def load_states():
-    try:
-        with open(DEFAULTS_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-def save_states(d):
-    try:
-        with open(DEFAULTS_PATH, "w", encoding="utf-8") as f:
-            json.dump(d, f, indent=2)
-    except Exception:
-        pass
-
-states = load_states()
+states = load_defaults()
 
 # Sidebar inputs — grouped
 st.sidebar.header("Inputs (persisted)")
 
 colA, colB = st.sidebar.columns(2)
-HFO_t = colA.number_input(f"{CF_LABELS['HFO']} — Tons", min_value=0.0, value=float(states.get("HFO_t", 0.0)), step=0.1)
+HFO_t = colA.number_input(f"{CF_LABELS['HFO']} — Tons", min_value=0.0, value=float(states.get("HFO_t", 100.0)), step=0.1)
 LFO_t = colB.number_input(f"{CF_LABELS['LFO']} — Tons", min_value=0.0, value=float(states.get("LFO_t", 0.0)), step=0.1)
 MDO_t = colA.number_input(f"{CF_LABELS['MDO']} — Tons", min_value=0.0, value=float(states.get("MDO_t", 0.0)), step=0.1)
 OTH_t = colB.number_input(f"{CF_LABELS['OTH']} — Tons", min_value=0.0, value=float(states.get("OTH_t", 0.0)), step=0.1)
@@ -348,19 +335,19 @@ OTH_t = colB.number_input(f"{CF_LABELS['OTH']} — Tons", min_value=0.0, value=f
 st.sidebar.markdown("---")
 colC, colD = st.sidebar.columns(2)
 WtW_HFO = colC.number_input("WtW HFO [gCO₂e/MJ]", min_value=0.0, value=float(states.get("WtW_HFO", 92.784)), step=0.001, format="%.3f")
-WtW_LFO = colD.number_input("WtW LFO [gCO₂e/MJ]", min_value=0.0, value=float(states.get("WtW_LFO", 92.0)), step=0.001, format="%.3f")
-WtW_MDO = colC.number_input("WtW MDO/MGO [gCO₂e/MJ]", min_value=0.0, value=float(states.get("WtW_MDO", 93.0)), step=0.001, format="%.3f")
-WtW_OTH = colD.number_input("WtW Others [gCO₂e/MJ]", min_value=0.0, value=float(states.get("WtW_OTH", 70.3)), step=0.001, format="%.3f")
+WtW_LFO = colD.number_input("WtW LFO [gCO₂e/MJ]", min_value=0.0, value=float(states.get("WtW_LFO", 91.251)), step=0.001, format="%.3f")
+WtW_MDO = colC.number_input("WtW MDO/MGO [gCO₂e/MJ]", min_value=0.0, value=float(states.get("WtW_MDO", 93.932)), step=0.001, format="%.3f")
+WtW_OTH = colD.number_input("WtW Others [gCO₂e/MJ]", min_value=0.0, value=float(states.get("WtW_OTH", 70.366)), step=0.001, format="%.3f")
 
 st.sidebar.markdown("---")
 colE, colF = st.sidebar.columns(2)
-LCV_HFO = colE.number_input("LCV HFO [MJ/ton]", min_value=0.0, value=float(states.get("LCV_HFO", 40400.0)), step=100.0)
-LCV_LFO = colF.number_input("LCV LFO [MJ/ton]", min_value=0.0, value=float(states.get("LCV_LFO", 42700.0)), step=100.0)
-LCV_MDO = colE.number_input("LCV MDO/MGO [MJ/ton]", min_value=0.0, value=float(states.get("LCV_MDO", 42600.0)), step=100.0)
-LCV_OTH = colF.number_input("LCV Others [MJ/ton]", min_value=0.0, value=float(states.get("LCV_OTH", 38000.0)), step=100.0)
+LCV_HFO = colE.number_input("LCV HFO [MJ/ton]", min_value=0.0, value=float(states.get("LCV_HFO", 40200.0)), step=100.0)
+LCV_LFO = colF.number_input("LCV LFO [MJ/ton]", min_value=0.0, value=float(states.get("LCV_LFO", 41000.0)), step=100.0)
+LCV_MDO = colE.number_input("LCV MDO/MGO [MJ/ton]", min_value=0.0, value=float(states.get("LCV_MDO", 42700.0)), step=100.0)
+LCV_OTH = colF.number_input("LCV Others [MJ/ton]", min_value=0.0, value=float(states.get("LCV_OTH", 37000.0)), step=100.0)
 
 st.sidebar.markdown("---")
-PREMIUM = st.sidebar.number_input("Premium [USD/ton] (Others − HFO)", min_value=0.0, value=float(states.get("PREMIUM", 350.0)), step=10.0)
+PREMIUM = st.sidebar.number_input("Premium [USD/ton] (Others − HFO)", min_value=0.0, value=float(states.get("PREMIUM", 305.0)), step=10.0)
 
 if st.sidebar.button("Save as defaults", use_container_width=True):
     new_states = {
@@ -369,7 +356,7 @@ if st.sidebar.button("Save as defaults", use_container_width=True):
         "LCV_HFO": LCV_HFO, "LCV_LFO": LCV_LFO, "LCV_MDO": LCV_MDO, "LCV_OTH": LCV_OTH,
         "PREMIUM": PREMIUM,
     }
-    save_states(new_states)
+    save_defaults(new_states)
     st.sidebar.success("Defaults saved.")
 
 # Build FuelInputs
