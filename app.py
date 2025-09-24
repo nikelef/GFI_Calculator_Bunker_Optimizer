@@ -215,7 +215,7 @@ def optimize_energy_neutral(
     fi: FuelInputs,
     year: int,
     coarse_steps: int = 200,
-    fine_window: float = 0.02,
+    fine_window: float = 0.01,
     fine_step: float = 0.001,
 ) -> Tuple[float, float, float, float, float]:
     """Per‑year optimization.
@@ -378,12 +378,37 @@ kpi1.metric("GFI (gCO₂e/MJ)", f"{GFI:.3f}")
 kpi2.metric("Total energy (MJ)", f"{TOTAL_MJ:,.0f}")
 
 # GFI plot vs targets
+# Build step-wise x so Base/Direct are flat within each year
+X_STEP = YEARS + [YEARS[-1] + 1]
+base_step   = [GFI_BASE[y] for y in YEARS]   + [GFI_BASE[YEARS[-1]]]
+direct_step = [GFI_DIRECT[y] for y in YEARS] + [GFI_DIRECT[YEARS[-1]]]
+gfi_step    = [GFI] * len(X_STEP)
+baseline_step = [GFI2008] * len(X_STEP)
+
 fig = go.Figure()
-fig.add_trace(go.Scatter(x=YEARS, y=[GFI]*len(YEARS), mode="lines", name="GFI attained", line=dict(width=3)))
-fig.add_trace(go.Scatter(x=YEARS, y=[GFI_BASE[y] for y in YEARS], mode="lines", name="Base target", line=dict(dash="dash")))
-fig.add_trace(go.Scatter(x=YEARS, y=[GFI_DIRECT[y] for y in YEARS], mode="lines", name="Direct target", line=dict(dash="dot")))
-fig.add_trace(go.Scatter(x=YEARS, y=[GFI2008]*len(YEARS), mode="lines", name="Baseline 2008", line=dict(color="black", dash="longdash")))
-fig.update_layout(height=360, margin=dict(l=10,r=10,t=40,b=10), yaxis_title="gCO₂e/MJ", xaxis_title="Year")
+fig.add_trace(go.Scatter(
+    x=X_STEP, y=gfi_step, mode="lines", name="GFI attained",
+    line=dict(width=3), line_shape="hv"
+))
+fig.add_trace(go.Scatter(
+    x=X_STEP, y=base_step, mode="lines", name="Base target (step)",
+    line=dict(dash="dash"), line_shape="hv"
+))
+fig.add_trace(go.Scatter(
+    x=X_STEP, y=direct_step, mode="lines", name="Direct target (step)",
+    line=dict(dash="dot"), line_shape="hv"
+))
+fig.add_trace(go.Scatter(
+    x=X_STEP, y=baseline_step, mode="lines", name="Baseline 2008",
+    line=dict(color="black", dash="longdash"), line_shape="hv"
+))
+fig.update_layout(
+    height=360,
+    margin=dict(l=10, r=10, t=40, b=10),
+    yaxis_title="gCO₂e/MJ",
+    xaxis_title="Year",
+    xaxis=dict(tickmode="array", tickvals=YEARS)
+)
 st.plotly_chart(fig, use_container_width=True)
 
 # Per‑year tables and bars
