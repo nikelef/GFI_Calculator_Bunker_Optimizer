@@ -411,14 +411,17 @@ fig.update_layout(
 )
 st.plotly_chart(fig, use_container_width=True)
 
-# Per‑year tables and bars
+# Per-year tables and bars
 rows: List[Dict] = []
 for yr in YEARS:
     deficit_t = deficit_surplus_tCO2eq(GFI, TOTAL_MJ, yr)
     t1_usd, t2_usd, ben_usd = tier_costs_usd(GFI, TOTAL_MJ, yr)
-    # Optimization per year
+
+    # Optimization (used only for reporting deltas; costs below are pre-optimization)
     hfo_red_t, oth_inc_t, gfi_new, reg_cost_opt, premium_cost_opt = optimize_energy_neutral(fi, yr)
 
+    # Build the row — costs are based on the initial (pre-optimization) GFI,
+    # Premium Fuel Cost is Premium × initial Others (OTH_t)
     rows.append({
         "Year": yr,
         "GFI (g/MJ)": round(GFI, 6),
@@ -426,28 +429,45 @@ for yr in YEARS:
         "GFI_Tier_1_Cost_USD": t1_usd,
         "GFI_Tier_2_Cost_USD": t2_usd,
         "GFI_Benefit_USD": ben_usd,
-        "HFO_Reduction_For_Opt_Cost_t": hfo_red_t,
-        "Other_Fuel_Increase_For_Opt_Cost_t": oth_inc_t,
         "Regulatory_Cost_USD": t1_usd + t2_usd + ben_usd,
         "Premium_Fuel_Cost_USD": PREMIUM * OTH_t,
         "Total_Cost_USD": (t1_usd + t2_usd + ben_usd) + (PREMIUM * OTH_t),
+        # Put optimization deltas LAST as requested:
+        "HFO_Reduction_For_Opt_Cost_t": hfo_red_t,
+        "Other_Fuel_Increase_For_Opt_Cost_t": oth_inc_t,
     })
 
 res_df = pd.DataFrame(rows)
 
-st.subheader("Per‑Year Results (2028–2035)")
+# Explicit column order so the two optimization columns appear at the end
+res_df = res_df[[
+    "Year",
+    "GFI (g/MJ)",
+    "GFI_Deficit_Surplus_tCO2eq",
+    "GFI_Tier_1_Cost_USD",
+    "GFI_Tier_2_Cost_USD",
+    "GFI_Benefit_USD",
+    "Regulatory_Cost_USD",
+    "Premium_Fuel_Cost_USD",
+    "Total_Cost_USD",
+    "HFO_Reduction_For_Opt_Cost_t",
+    "Other_Fuel_Increase_For_Opt_Cost_t",
+]]
+
+st.subheader("Per-Year Results (2028–2035)")
 st.dataframe(res_df.style.format({
     "GFI (g/MJ)": "{:.3f}",
     "GFI_Deficit_Surplus_tCO2eq": "{:.3f}",
     "GFI_Tier_1_Cost_USD": "{:,.0f}",
     "GFI_Tier_2_Cost_USD": "{:,.0f}",
     "GFI_Benefit_USD": "{:,.0f}",
-    "HFO_Reduction_For_Opt_Cost_t": "{:.3f}",
-    "Other_Fuel_Increase_For_Opt_Cost_t": "{:.3f}",
     "Regulatory_Cost_USD": "{:,.0f}",
     "Premium_Fuel_Cost_USD": "{:,.0f}",
     "Total_Cost_USD": "{:,.0f}",
+    "HFO_Reduction_For_Opt_Cost_t": "{:.3f}",
+    "Other_Fuel_Increase_For_Opt_Cost_t": "{:.3f}",
 }), use_container_width=True, height=380)
+
 
 # Bar charts
 def bar_chart(title: str, ycol: str):
