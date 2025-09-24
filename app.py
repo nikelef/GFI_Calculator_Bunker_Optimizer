@@ -299,7 +299,7 @@ def optimize_energy_neutral(
 # UI — Streamlit
 # ──────────────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="GFI Bunkering Optimizer — Single Vessel", layout="wide")
-st.title("GFI Bunkering Optimizer — Single Vessel")
+st.title("GFI Bunkering Optimizer — Nikitas Eleftheriou")
 
 with st.expander("Methodology & Units", expanded=False):
     st.markdown(
