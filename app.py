@@ -1,7 +1,7 @@
 # app.py — GFI Bunkering Optimizer (Single Vessel)
 # ------------------------------------------------
-# A self‑contained Streamlit web app that turns your original Excel‑based logic
-# into a user‑friendly tool for a *single vessel*.
+# A self-contained Streamlit web app that turns your original Excel-based logic
+# into a user-friendly tool for a *single vessel*.
 #
 # Key features
 # • Inputs (persisted between runs):
@@ -20,7 +20,7 @@
 #   - Regulatory Cost = Tier1 + Tier2 + Benefit (benefit can be negative)
 #   - Premium Fuel Cost = Premium × Other_Fuel_Increase_For_Opt_Cost_year
 #   - Total Optimized Cost = Regulatory Cost + Premium Fuel Cost
-# • Energy‑neutral optimization per YEAR: reduce HFO, increase Others so total
+# • Energy-neutral optimization per YEAR: reduce HFO, increase Others so total
 #   fuel MJ stays constant; objective = min(RegulatoryCost + PremiumCost).
 # • Export results to Excel; all constants match your original script.
 #
@@ -218,7 +218,7 @@ def optimize_energy_neutral(
     fine_window: float = 0.02,
     fine_step: float = 0.001,
 ) -> Tuple[float, float, float, float, float]:
-    """Per‑year optimization.
+    """Per-year optimization.
 
     Returns: (hfo_red_t, oth_inc_t, gfi_new, reg_cost_usd, premium_cost_usd)
     
@@ -243,9 +243,6 @@ def optimize_energy_neutral(
         d_hfo = fi.HFO_t - hfo_new
         oth_new = fi.OTH_t + (d_hfo * fi.LCV_HFO) / fi.LCV_OTH
 
-        # New GFI using same total MJ (by construction it's unchanged):
-        # Actually total MJ is preserved by the energy‑neutral swap, but we
-        # recompute for completeness/numerical safety.
         total_MJ = (
             hfo_new * fi.LCV_HFO
             + fi.LFO_t * fi.LCV_LFO
@@ -311,9 +308,9 @@ with st.expander("Methodology & Units", expanded=False):
             - If GFI > Base_y: (GFI−Base_y + Base_y−Direct_y)·TotalMJ / 10⁶
             - If Direct_y ≤ GFI ≤ Base_y: (GFI−Direct_y)·TotalMJ / 10⁶
             - If GFI < Direct_y: (GFI−Direct_y)·TotalMJ / 10⁶ (negative surplus)
-        - **Tier costs** \[USD]: Tier‑1 = 100, Tier‑2 = 380, Benefit = 380 × (negative mass)
+        - **Tier costs** \[USD]: Tier-1 = 100, Tier-2 = 380, Benefit = 380 × (negative mass)
         - **Optimization (per year):** reduce **HFO** by Δ (tons) and increase **Others** by
-          Δ·LCV_HFO/LCV_OTH (energy‑neutral). Objective: minimize
+          Δ·LCV_HFO/LCV_OTH (energy-neutral). Objective: minimize
           *(Tier1 + Tier2 + Benefit + Premium·max(ΔOTH,0))*.
         
         **Units**: Mass in tons; LCV in MJ/ton; WtW in gCO₂e/MJ.
@@ -377,8 +374,7 @@ kpi1, kpi2 = st.columns(2)
 kpi1.metric("GFI (gCO₂e/MJ)", f"{GFI:.3f}")
 kpi2.metric("Total energy (MJ)", f"{TOTAL_MJ:,.0f}")
 
-# GFI plot vs targets
-# Build step-wise x so Base/Direct are flat within each year
+# GFI plot vs targets — step-wise (compact + slimmer lines)
 X_STEP = YEARS + [YEARS[-1] + 1]
 base_step   = [GFI_BASE[y] for y in YEARS]   + [GFI_BASE[YEARS[-1]]]
 direct_step = [GFI_DIRECT[y] for y in YEARS] + [GFI_DIRECT[YEARS[-1]]]
@@ -402,12 +398,16 @@ fig.add_trace(go.Scatter(
     x=X_STEP, y=baseline_step, mode="lines", name="Baseline 2008",
     line=dict(color="black", dash="longdash"), line_shape="hv"
 ))
+# Make lines slimmer & layout more compact
+fig.update_traces(line=dict(width=2))
 fig.update_layout(
-    height=360,
-    margin=dict(l=10, r=10, t=40, b=10),
+    height=300,
+    margin=dict(l=6, r=6, t=30, b=6),
     yaxis_title="gCO₂e/MJ",
     xaxis_title="Year",
-    xaxis=dict(tickmode="array", tickvals=YEARS)
+    xaxis=dict(tickmode="array", tickvals=YEARS, tickfont=dict(size=10)),
+    yaxis=dict(tickfont=dict(size=10)),
+    legend=dict(orientation="h", y=-0.2)
 )
 st.plotly_chart(fig, use_container_width=True)
 
@@ -469,10 +469,52 @@ st.dataframe(res_df.style.format({
 }), use_container_width=True, height=380)
 
 
-# Bar charts
+# Bar charts — thinner bars, compact layout, values on top
 def bar_chart(title: str, ycol: str):
-    figb = px.bar(res_df, x="Year", y=ycol, title=title)
-    figb.update_layout(height=320, margin=dict(l=10,r=10,t=40,b=10))
+    # Choose a concise label format per series
+    fmt_map = {
+        "GFI_Deficit_Surplus_tCO2eq": ",.1f",
+        "Regulatory_Cost_USD": ",.0f",
+        "Premium_Fuel_Cost_USD": ",.0f",
+        "Total_Cost_USD": ",.0f",
+        "GFI_Tier_1_Cost_USD": ",.0f",
+        "GFI_Tier_2_Cost_USD": ",.0f",
+        "GFI_Benefit_USD": ",.0f",
+    }
+    textfmt = fmt_map.get(ycol, ",.2f")
+
+    figb = px.bar(res_df, x="Year", y=ycol, title=title, text=ycol)
+
+    # Put values on top of each bar; prevent clipping beyond axes
+    figb.update_traces(
+        texttemplate=f"%{{text:{textfmt}}}",
+        textposition="outside",
+        cliponaxis=False
+    )
+
+    # Make bars thinner & figure more compact
+    figb.update_layout(
+        height=240,
+        margin=dict(l=6, r=6, t=28, b=6),
+        bargap=0.55,        # ↑ gap ⇒ thinner bars
+        bargroupgap=0.30,   # extra separation (if grouped in future)
+        showlegend=False,
+        xaxis=dict(tickmode="array", tickvals=YEARS, tickfont=dict(size=10)),
+        yaxis=dict(title=None, tickfont=dict(size=10)),
+        uniformtext_minsize=8,
+        uniformtext_mode="hide"
+    )
+
+    # Add headroom/footroom so labels fit neatly
+    yvals = res_df[ycol].astype(float)
+    if not yvals.empty:
+        ymax = float(yvals.max())
+        ymin = float(yvals.min())
+        pad_up = 0.08 * abs(ymax) if ymax != 0 else 1.0
+        pad_dn = 0.08 * abs(ymin) if ymin != 0 else 0.0
+        if ymax != ymin:
+            figb.update_yaxes(range=[ymin - pad_dn, ymax + pad_up])
+
     st.plotly_chart(figb, use_container_width=True)
 
 c1, c2 = st.columns(2)
@@ -513,4 +555,4 @@ st.download_button(
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
 
-st.caption("© 2025 — Single‑vessel GFI optimizer. All constants and logic aligned with your original script.")
+st.caption("© 2025 — Single-vessel GFI optimizer. All constants and logic aligned with your original script.")
