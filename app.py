@@ -374,7 +374,7 @@ kpi1, kpi2 = st.columns(2)
 kpi1.metric("GFI (gCO₂e/MJ)", f"{GFI:.3f}")
 kpi2.metric("Total energy (MJ)", f"{TOTAL_MJ:,.0f}")
 
-# GFI plot vs targets — step-wise (compact + slimmer lines)
+# GFI plot vs targets — step-wise (more compact)
 X_STEP = YEARS + [YEARS[-1] + 1]
 base_step   = [GFI_BASE[y] for y in YEARS]   + [GFI_BASE[YEARS[-1]]]
 direct_step = [GFI_DIRECT[y] for y in YEARS] + [GFI_DIRECT[YEARS[-1]]]
@@ -384,30 +384,28 @@ baseline_step = [GFI2008] * len(X_STEP)
 fig = go.Figure()
 fig.add_trace(go.Scatter(
     x=X_STEP, y=gfi_step, mode="lines", name="GFI attained",
-    line=dict(width=3), line_shape="hv"
+    line=dict(width=2), line_shape="hv"
 ))
 fig.add_trace(go.Scatter(
     x=X_STEP, y=base_step, mode="lines", name="Base target (step)",
-    line=dict(dash="dash"), line_shape="hv"
+    line=dict(dash="dash", width=2), line_shape="hv"
 ))
 fig.add_trace(go.Scatter(
     x=X_STEP, y=direct_step, mode="lines", name="Direct target (step)",
-    line=dict(dash="dot"), line_shape="hv"
+    line=dict(dash="dot", width=2), line_shape="hv"
 ))
 fig.add_trace(go.Scatter(
     x=X_STEP, y=baseline_step, mode="lines", name="Baseline 2008",
-    line=dict(color="black", dash="longdash"), line_shape="hv"
+    line=dict(color="black", dash="longdash", width=2), line_shape="hv"
 ))
-# Make lines slimmer & layout more compact
-fig.update_traces(line=dict(width=2))
 fig.update_layout(
-    height=300,
-    margin=dict(l=6, r=6, t=30, b=6),
+    height=260,  # more compact
+    margin=dict(l=6, r=6, t=26, b=4),
     yaxis_title="gCO₂e/MJ",
     xaxis_title="Year",
     xaxis=dict(tickmode="array", tickvals=YEARS, tickfont=dict(size=10)),
     yaxis=dict(tickfont=dict(size=10)),
-    legend=dict(orientation="h", y=-0.2)
+    legend=dict(orientation="h", y=-0.25)
 )
 st.plotly_chart(fig, use_container_width=True)
 
@@ -466,10 +464,9 @@ st.dataframe(res_df.style.format({
     "Total_Cost_USD": "{:,.0f}",
     "HFO_Reduction_For_Opt_Cost_t": "{:.3f}",
     "Other_Fuel_Increase_For_Opt_Cost_t": "{:.3f}",
-}), use_container_width=True, height=380)
+}), use_container_width=True, height=360)
 
-
-# Bar charts — thinner bars, compact layout, values on top
+# Bar charts — bars closer, graphs compact, labels bigger & bold-like
 def bar_chart(title: str, ycol: str):
     # Choose a concise label format per series
     fmt_map = {
@@ -485,33 +482,34 @@ def bar_chart(title: str, ycol: str):
 
     figb = px.bar(res_df, x="Year", y=ycol, title=title, text=ycol)
 
-    # Put values on top of each bar; prevent clipping beyond axes
+    # Labels on top; make them larger and bold-like via font family
     figb.update_traces(
         texttemplate=f"%{{text:{textfmt}}}",
         textposition="outside",
-        cliponaxis=False
+        cliponaxis=False,
+        outsidetextfont=dict(size=13, family="Arial Black")  # bigger & bold-like
     )
 
-    # Make bars thinner & figure more compact
+    # Bars closer together (thicker bars), compact layout
     figb.update_layout(
-        height=240,
-        margin=dict(l=6, r=6, t=28, b=6),
-        bargap=0.55,        # ↑ gap ⇒ thinner bars
-        bargroupgap=0.30,   # extra separation (if grouped in future)
+        height=210,  # more compact
+        margin=dict(l=4, r=4, t=24, b=4),
+        bargap=0.15,        # ↓ gap ⇒ bars closer
+        bargroupgap=0.05,   # if grouped in future
         showlegend=False,
         xaxis=dict(tickmode="array", tickvals=YEARS, tickfont=dict(size=10)),
         yaxis=dict(title=None, tickfont=dict(size=10)),
-        uniformtext_minsize=8,
+        uniformtext_minsize=9,
         uniformtext_mode="hide"
     )
 
-    # Add headroom/footroom so labels fit neatly
+    # Add headroom/footroom for labels
     yvals = res_df[ycol].astype(float)
     if not yvals.empty:
         ymax = float(yvals.max())
         ymin = float(yvals.min())
-        pad_up = 0.08 * abs(ymax) if ymax != 0 else 1.0
-        pad_dn = 0.08 * abs(ymin) if ymin != 0 else 0.0
+        pad_up = 0.10 * abs(ymax) if ymax != 0 else 1.0
+        pad_dn = 0.10 * abs(ymin) if ymin != 0 else 0.0
         if ymax != ymin:
             figb.update_yaxes(range=[ymin - pad_dn, ymax + pad_up])
 
