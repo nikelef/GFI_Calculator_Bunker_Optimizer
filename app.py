@@ -330,7 +330,7 @@ with st.expander("Methodology & Units", expanded=False):
             - If GFI > Base_y: (GFI−Base_y + Base_y−Direct_y)·TotalMJ / 10⁶
             - If Direct_y ≤ GFI ≤ Base_y: (GFI−Direct_y)·TotalMJ / 10⁶
             - If GFI < Direct_y: (GFI−Direct_y)·TotalMJ / 10⁶ (negative surplus)
-        - **Tier costs** \[USD]: Tier-1 = 100, Tier-2 = 380, Benefit = 380 × (negative mass)
+        - **Tier costs** \[USD]: Tier-1 = 100, Tier-2 = 380, Benefit = 190 × (negative mass)
         - **Optimization (per year):** reduce **selected fuel (HFO/LFO/MDO-MGO)** by Δ (tons)
           and increase **Others** by Δ·LCV_selected/LCV_OTH (energy-neutral). Objective:
           minimize *(Tier1 + Tier2 + Benefit + Premium·max(ΔOTH,0))*.
