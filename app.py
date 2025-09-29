@@ -79,7 +79,7 @@ YEARS = list(range(2028, 2036))
 # Cost rates (USD per tCO2eq)
 TIER1_COST = 100.0
 TIER2_COST = 380.0
-BENEFIT_RATE = 380.0  # negative mass → negative $ (benefit/credit)
+BENEFIT_RATE = 190.0  # negative mass → negative $ (benefit/credit)
 
 # Default persistence file
 DEFAULTS_PATH = ".gfi_bunkering_defaults.json"
