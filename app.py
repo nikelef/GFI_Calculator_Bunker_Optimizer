@@ -317,8 +317,8 @@ def optimize_energy_neutral(
 # ──────────────────────────────────────────────────────────────────────────────
 # UI — Streamlit
 # ──────────────────────────────────────────────────────────────────────────────
-st.set_page_config(page_title="GFI Bunkering Optimizer — Single Vessel", layout="wide")
-st.title("GFI Bunkering Optimizer — TMS NE")
+st.set_page_config(page_title="GFI Bunkering Optimizer 1.1 — TMS NE ", layout="wide")
+st.title("GFI Bunkering Optimizer 1.1 — TMS NE")
 
 with st.expander("Methodology & Units", expanded=False):
     st.markdown(
@@ -602,7 +602,7 @@ with pd.ExcelWriter(buf, engine="openpyxl") as xw:
 st.download_button(
     label="Download results (Excel)",
     data=buf.getvalue(),
-    file_name="GFI_Bunkering_Optimizer_SingleVessel.xlsx",
+    file_name="GFI_Bunkering_Optimizer_1_1.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
 
