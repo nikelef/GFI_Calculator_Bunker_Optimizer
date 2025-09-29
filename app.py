@@ -3,26 +3,27 @@
 # A self-contained Streamlit web app that turns your original Excel-based logic
 # into a user-friendly tool for a *single vessel*.
 #
-# Key features
+# Key features (unchanged)
 # • Inputs (persisted between runs):
 #   - Fuel quantities [tons] for HFO (Cf:3.114), LFO (Cf:3.151), MDO/MGO (Cf:3.206), Others (Cf:—)
 #   - WtW intensities [gCO2eq/MJ] for each fuel
 #   - LCVs [MJ/ton] for each fuel (NOTE: original logic used ton-based mass)
-#   - Premium [USD/ton] = (Others price – HFO price)
-# • Outputs for 2028–2035:
+#   - Premium [USD/ton] = price difference (Others − Selected Fuel)
+# • Outputs for 2028–2035 (unchanged):
 #   - GFI (gCO2eq/MJ) + plot vs. Base/Direct targets + baseline
 #   - GFI_Deficit_Surplus_year [tCO2eq]
 #   - GFI_Tier_1_Cost_year [USD]
 #   - GFI_Tier_2_Cost_year [USD]
 #   - GFI_Benefit_year [USD]
-#   - HFO_Reduction_For_Opt_Cost_year [tons]
+#   - <SelectedFuel>_Reduction_For_Opt_Cost_year [tons]
 #   - Other_Fuel_Increase_For_Opt_Cost_year [tons]
-#   - Regulatory Cost = Tier1 + Tier2 + Benefit (benefit can be negative)
-#   - Premium Fuel Cost = Premium × Other_Fuel_Increase_For_Opt_Cost_year
-#   - Total Optimized Cost = Regulatory Cost + Premium Fuel Cost
-# • Energy-neutral optimization per YEAR: reduce HFO, increase Others so total
-#   fuel MJ stays constant; objective = min(RegulatoryCost + PremiumCost).
-# • Export results to Excel; all constants match your original script.
+#   - Regulatory Cost = Tier1 + Tier2 + Benefit  (INITIAL values; not post-optimization)
+#   - Premium Fuel Cost = Premium × Others (INITIAL Others; not post-optimization)
+#   - Total Cost = Regulatory Cost + Premium Fuel Cost
+# • Energy-neutral optimization per YEAR: reduce the **selected fossil fuel**
+#   (HFO or LFO or MDO/MGO), increase Others so total MJ stays constant;
+#   objective = min(RegulatoryCost + PremiumCost).  (Used only to report deltas,
+#   costs shown remain the INITIAL ones as in the original code.)
 #
 # How to run
 #   1) pip install streamlit plotly pandas openpyxl
@@ -114,7 +115,7 @@ class FuelInputs:
     LCV_MDO: float
     LCV_OTH: float
 
-    # Premium USD/ton (Others − HFO)
+    # Premium USD/ton (Others − Selected Fuel)
     PREMIUM: float
 
     def total_MJ(self) -> float:
@@ -158,11 +159,9 @@ def save_defaults(dct: Dict) -> None:
 GFI_BASE = {yr: (1 - ZT_BASE[yr] / 100.0) * GFI2008 for yr in YEARS}
 GFI_DIRECT = {yr: (1 - ZT_DIRECT[yr] / 100.0) * GFI2008 for yr in YEARS}
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Core calculations
 # ──────────────────────────────────────────────────────────────────────────────
-
 def deficit_surplus_tCO2eq(gfi_g_per_MJ: float, total_MJ: float, year: int) -> float:
     """Return GFI_Deficit_Surplus_year in tCO2eq.
     Sign convention:
@@ -214,82 +213,105 @@ def tier_costs_usd(gfi_g_per_MJ: float, total_MJ: float, year: int) -> Tuple[flo
 def optimize_energy_neutral(
     fi: FuelInputs,
     year: int,
+    reduce_fuel: str = "HFO",  # "HFO" | "LFO" | "MDO/MGO"
     coarse_steps: int = 200,
     fine_window: float = 0.02,
     fine_step: float = 0.001,
 ) -> Tuple[float, float, float, float, float]:
     """Per-year optimization.
 
-    Returns: (hfo_red_t, oth_inc_t, gfi_new, reg_cost_usd, premium_cost_usd)
-    
-    Strategy:
-      - Reduce a fraction f ∈ [0,1] of original HFO mass.
-      - Add Others to keep total MJ constant: ΔOTH = (ΔHFO * LCV_HFO) / LCV_OTH.
-      - Compute GFI, then Tier costs for *this* year.
-      - Premium cost = max(ΔOTH, 0) × PREMIUM (only pay extra for added Others).
-      - Choose f that minimizes (Tier1 + Tier2 + Benefit + PremiumCost).
+    Reduce the selected fossil fuel (HFO or LFO or MDO/MGO), increase Others to keep MJ constant.
+
+    Returns: (sel_red_t, oth_inc_t, gfi_new, reg_cost_usd, premium_cost_usd)
     """
-    if fi.HFO_t <= 0 or fi.LCV_OTH <= 0:
+    # Map selection to masses, WtW, LCV
+    if reduce_fuel == "HFO":
+        sel_mass0 = fi.HFO_t
+        sel_lcv = fi.LCV_HFO
+        sel_wtw = fi.WtW_HFO
+    elif reduce_fuel == "LFO":
+        sel_mass0 = fi.LFO_t
+        sel_lcv = fi.LCV_LFO
+        sel_wtw = fi.WtW_LFO
+    else:  # "MDO/MGO"
+        sel_mass0 = fi.MDO_t
+        sel_lcv = fi.LCV_MDO
+        sel_wtw = fi.WtW_MDO
+
+    if sel_mass0 <= 0 or fi.LCV_OTH <= 0:
         return 0.0, 0.0, fi.gfi(), 0.0, 0.0
 
-    # Baseline
+    # Baseline for reference
     total_MJ0 = fi.total_MJ()
-    gfi0 = fi.gfi()
-    t1_0, t2_0, ben_0 = tier_costs_usd(gfi0, total_MJ0, year)
-    base_reg_cost = t1_0 + t2_0 + ben_0
 
     def total_cost_for_fraction(f: float) -> Tuple[float, float, float, float, float]:
-        hfo_new = fi.HFO_t * (1.0 - f)
-        d_hfo = fi.HFO_t - hfo_new
-        oth_new = fi.OTH_t + (d_hfo * fi.LCV_HFO) / fi.LCV_OTH
+        # New masses after reducing selected fuel by fraction f and increasing Others to keep energy constant
+        sel_new = sel_mass0 * (1.0 - f)
+        d_sel = sel_mass0 - sel_new
+        oth_new = fi.OTH_t + (d_sel * sel_lcv) / fi.LCV_OTH
+
+        # Compose per-fuel new masses
+        hfo_new = fi.HFO_t
+        lfo_new = fi.LFO_t
+        mdo_new = fi.MDO_t
+        if reduce_fuel == "HFO":
+            hfo_new = sel_new
+        elif reduce_fuel == "LFO":
+            lfo_new = sel_new
+        else:
+            mdo_new = sel_new
 
         total_MJ = (
             hfo_new * fi.LCV_HFO
-            + fi.LFO_t * fi.LCV_LFO
-            + fi.MDO_t * fi.LCV_MDO
+            + lfo_new * fi.LCV_LFO
+            + mdo_new * fi.LCV_MDO
             + oth_new * fi.LCV_OTH
         )
         if total_MJ <= 0:
-            return np.inf, gfi0, 0.0, 0.0, 0.0
+            return np.inf, fi.gfi(), 0.0, 0.0, 0.0
 
         num_g = (
             hfo_new * fi.LCV_HFO * fi.WtW_HFO
-            + fi.LFO_t * fi.LCV_LFO * fi.WtW_LFO
-            + fi.MDO_t * fi.LCV_MDO * fi.WtW_MDO
+            + lfo_new * fi.LCV_LFO * fi.WtW_LFO
+            + mdo_new * fi.LCV_MDO * fi.WtW_MDO
             + oth_new * fi.LCV_OTH * fi.WtW_OTH
         )
         gfi_new = num_g / total_MJ
 
+        # Regulatory cost at this GFI for this year
         t1, t2, ben = tier_costs_usd(gfi_new, total_MJ, year)
-        premium_cost = max(oth_new - fi.OTH_t, 0.0) * fi.PREMIUM
         reg_cost = t1 + t2 + ben
+
+        # Premium cost only for the added Others (relative to initial Others)
+        premium_cost = max(oth_new - fi.OTH_t, 0.0) * fi.PREMIUM
+
         total_cost = reg_cost + premium_cost
-        return total_cost, gfi_new, reg_cost, premium_cost, d_hfo
+        return total_cost, gfi_new, reg_cost, premium_cost, d_sel
 
     # Coarse sweep over f ∈ {0, 1/coarse_steps, ..., 1}
     grid = np.linspace(0.0, 1.0, coarse_steps + 1)
     best = None
     for f in grid:
-        tot, gfi_new, reg, prem, d_hfo = total_cost_for_fraction(f)
+        tot, gfi_new, reg, prem, d_sel = total_cost_for_fraction(f)
         if best is None or tot < best[0]:
-            best = (tot, f, gfi_new, reg, prem, d_hfo)
+            best = (tot, f, gfi_new, reg, prem, d_sel)
 
-    _, f_best, gfi_best, reg_best, prem_best, d_hfo_best = best
+    _, f_best, gfi_best, reg_best, prem_best, d_sel_best = best
 
     # Fine local search around f_best
     lo = max(0.0, f_best - fine_window)
     hi = min(1.0, f_best + fine_window)
     f = lo
     while f <= hi + 1e-12:
-        tot, gfi_new, reg, prem, d_hfo = total_cost_for_fraction(f)
+        tot, gfi_new, reg, prem, d_sel = total_cost_for_fraction(f)
         if tot < (reg_best + prem_best) - 1e-12:
-            f_best, gfi_best, reg_best, prem_best, d_hfo_best = f, gfi_new, reg, prem, d_hfo
+            f_best, gfi_best, reg_best, prem_best, d_sel_best = f, gfi_new, reg, prem, d_sel
         f += fine_step
 
     # Final masses deltas
-    hfo_red = d_hfo_best
-    oth_inc = (hfo_red * fi.LCV_HFO) / fi.LCV_OTH if fi.LCV_OTH > 0 else 0.0
-    return hfo_red, oth_inc, gfi_best, reg_best, prem_best
+    sel_red = d_sel_best
+    oth_inc = (sel_red * sel_lcv) / fi.LCV_OTH if fi.LCV_OTH > 0 else 0.0
+    return sel_red, oth_inc, gfi_best, reg_best, prem_best
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -309,9 +331,9 @@ with st.expander("Methodology & Units", expanded=False):
             - If Direct_y ≤ GFI ≤ Base_y: (GFI−Direct_y)·TotalMJ / 10⁶
             - If GFI < Direct_y: (GFI−Direct_y)·TotalMJ / 10⁶ (negative surplus)
         - **Tier costs** \[USD]: Tier-1 = 100, Tier-2 = 380, Benefit = 380 × (negative mass)
-        - **Optimization (per year):** reduce **HFO** by Δ (tons) and increase **Others** by
-          Δ·LCV_HFO/LCV_OTH (energy-neutral). Objective: minimize
-          *(Tier1 + Tier2 + Benefit + Premium·max(ΔOTH,0))*.
+        - **Optimization (per year):** reduce **selected fuel (HFO/LFO/MDO-MGO)** by Δ (tons)
+          and increase **Others** by Δ·LCV_selected/LCV_OTH (energy-neutral). Objective:
+          minimize *(Tier1 + Tier2 + Benefit + Premium·max(ΔOTH,0))*.
         
         **Units**: Mass in tons; LCV in MJ/ton; WtW in gCO₂e/MJ.
         """
@@ -344,14 +366,27 @@ LCV_MDO = colE.number_input("LCV MDO/MGO [MJ/ton]", min_value=0.0, value=float(s
 LCV_OTH = colF.number_input("LCV Others [MJ/ton]", min_value=0.0, value=float(states.get("LCV_OTH", 37000.0)), step=100.0)
 
 st.sidebar.markdown("---")
-PREMIUM = st.sidebar.number_input("Premium [USD/ton] (Others − HFO)", min_value=0.0, value=float(states.get("PREMIUM", 305.0)), step=10.0)
+# Select which fossil fuel to reduce
+reduce_choice = st.sidebar.selectbox(
+    "Fuel to reduce (for optimization)",
+    options=["HFO", "LFO", "MDO/MGO"],
+    index=int(states.get("reduce_idx", 0))
+)
+
+# Premium now refers to (Others − Selected Fuel)
+PREMIUM = st.sidebar.number_input(
+    f"Premium [USD/ton] (Others − {reduce_choice})",
+    min_value=0.0,
+    value=float(states.get("PREMIUM", 305.0)),
+    step=10.0
+)
 
 if st.sidebar.button("Save as defaults", use_container_width=True):
     new_states = {
         "HFO_t": HFO_t, "LFO_t": LFO_t, "MDO_t": MDO_t, "OTH_t": OTH_t,
         "WtW_HFO": WtW_HFO, "WtW_LFO": WtW_LFO, "WtW_MDO": WtW_MDO, "WtW_OTH": WtW_OTH,
         "LCV_HFO": LCV_HFO, "LCV_LFO": LCV_LFO, "LCV_MDO": LCV_MDO, "LCV_OTH": LCV_OTH,
-        "PREMIUM": PREMIUM,
+        "PREMIUM": PREMIUM, "reduce_idx": ["HFO","LFO","MDO/MGO"].index(reduce_choice)
     }
     save_defaults(new_states)
     st.sidebar.success("Defaults saved.")
@@ -374,7 +409,7 @@ kpi1, kpi2 = st.columns(2)
 kpi1.metric("GFI (gCO₂e/MJ)", f"{GFI:.3f}")
 kpi2.metric("Total energy (MJ)", f"{TOTAL_MJ:,.0f}")
 
-# GFI plot vs targets — step-wise (more compact)
+# GFI plot vs targets — step-wise (compact)
 X_STEP = YEARS + [YEARS[-1] + 1]
 base_step   = [GFI_BASE[y] for y in YEARS]   + [GFI_BASE[YEARS[-1]]]
 direct_step = [GFI_DIRECT[y] for y in YEARS] + [GFI_DIRECT[YEARS[-1]]]
@@ -399,7 +434,7 @@ fig.add_trace(go.Scatter(
     line=dict(color="black", dash="longdash", width=2), line_shape="hv"
 ))
 fig.update_layout(
-    height=260,  # more compact
+    height=260,  # compact
     margin=dict(l=6, r=6, t=26, b=4),
     yaxis_title="gCO₂e/MJ",
     xaxis_title="Year",
@@ -411,15 +446,24 @@ st.plotly_chart(fig, use_container_width=True)
 
 # Per-year tables and bars
 rows: List[Dict] = []
+
+# Dynamic reduction column name per selection
+if reduce_choice == "HFO":
+    red_col_name = "HFO_Reduction_For_Opt_Cost_t"
+elif reduce_choice == "LFO":
+    red_col_name = "LFO_Reduction_For_Opt_Cost_t"
+else:
+    red_col_name = "MDO/MGO_Reduction_For_Opt_Cost_t"
+
 for yr in YEARS:
     deficit_t = deficit_surplus_tCO2eq(GFI, TOTAL_MJ, yr)
     t1_usd, t2_usd, ben_usd = tier_costs_usd(GFI, TOTAL_MJ, yr)
 
-    # Optimization (used only for reporting deltas; costs below are pre-optimization)
-    hfo_red_t, oth_inc_t, gfi_new, reg_cost_opt, premium_cost_opt = optimize_energy_neutral(fi, yr)
+    # Optimization (only for reporting deltas; costs below are pre-optimization)
+    sel_red_t, oth_inc_t, gfi_new, reg_cost_opt, premium_cost_opt = optimize_energy_neutral(
+        fi, yr, reduce_fuel=reduce_choice
+    )
 
-    # Build the row — costs are based on the initial (pre-optimization) GFI,
-    # Premium Fuel Cost is Premium × initial Others (OTH_t)
     rows.append({
         "Year": yr,
         "GFI (g/MJ)": round(GFI, 6),
@@ -427,17 +471,18 @@ for yr in YEARS:
         "GFI_Tier_1_Cost_USD": t1_usd,
         "GFI_Tier_2_Cost_USD": t2_usd,
         "GFI_Benefit_USD": ben_usd,
+        # Regulatory, Premium, Total based on INITIAL values (unchanged requirement)
         "Regulatory_Cost_USD": t1_usd + t2_usd + ben_usd,
         "Premium_Fuel_Cost_USD": PREMIUM * OTH_t,
         "Total_Cost_USD": (t1_usd + t2_usd + ben_usd) + (PREMIUM * OTH_t),
-        # Put optimization deltas LAST as requested:
-        "HFO_Reduction_For_Opt_Cost_t": hfo_red_t,
+        # Optimization deltas LAST:
+        red_col_name: sel_red_t,
         "Other_Fuel_Increase_For_Opt_Cost_t": oth_inc_t,
     })
 
 res_df = pd.DataFrame(rows)
 
-# Explicit column order so the two optimization columns appear at the end
+# Explicit column order so the optimization columns appear at the end
 res_df = res_df[[
     "Year",
     "GFI (g/MJ)",
@@ -448,7 +493,7 @@ res_df = res_df[[
     "Regulatory_Cost_USD",
     "Premium_Fuel_Cost_USD",
     "Total_Cost_USD",
-    "HFO_Reduction_For_Opt_Cost_t",
+    red_col_name,
     "Other_Fuel_Increase_For_Opt_Cost_t",
 ]]
 
@@ -462,13 +507,12 @@ st.dataframe(res_df.style.format({
     "Regulatory_Cost_USD": "{:,.0f}",
     "Premium_Fuel_Cost_USD": "{:,.0f}",
     "Total_Cost_USD": "{:,.0f}",
-    "HFO_Reduction_For_Opt_Cost_t": "{:.3f}",
+    red_col_name: "{:.3f}",
     "Other_Fuel_Increase_For_Opt_Cost_t": "{:.3f}",
 }), use_container_width=True, height=360)
 
-# Bar charts — bars closer, graphs compact, labels bigger & bold-like
+# Bar charts — compact with labels bigger & bold-like
 def bar_chart(title: str, ycol: str):
-    # Choose a concise label format per series
     fmt_map = {
         "GFI_Deficit_Surplus_tCO2eq": ",.1f",
         "Regulatory_Cost_USD": ",.0f",
@@ -481,21 +525,17 @@ def bar_chart(title: str, ycol: str):
     textfmt = fmt_map.get(ycol, ",.2f")
 
     figb = px.bar(res_df, x="Year", y=ycol, title=title, text=ycol)
-
-    # Labels on top; make them larger and bold-like via font family
     figb.update_traces(
         texttemplate=f"%{{text:{textfmt}}}",
         textposition="outside",
         cliponaxis=False,
-        outsidetextfont=dict(size=13, family="Arial Black")  # bigger & bold-like
+        outsidetextfont=dict(size=13, family="Arial Black")
     )
-
-    # Bars closer together (thicker bars), compact layout
     figb.update_layout(
-        height=210,  # more compact
+        height=210,
         margin=dict(l=4, r=4, t=24, b=4),
-        bargap=0.15,        # ↓ gap ⇒ bars closer
-        bargroupgap=0.05,   # if grouped in future
+        bargap=0.15,
+        bargroupgap=0.05,
         showlegend=False,
         xaxis=dict(tickmode="array", tickvals=YEARS, tickfont=dict(size=10)),
         yaxis=dict(title=None, tickfont=dict(size=10)),
@@ -503,7 +543,6 @@ def bar_chart(title: str, ycol: str):
         uniformtext_mode="hide"
     )
 
-    # Add headroom/footroom for labels
     yvals = res_df[ycol].astype(float)
     if not yvals.empty:
         ymax = float(yvals.max())
@@ -527,7 +566,6 @@ with c3:
 with c4:
     bar_chart("Total Cost [USD]", "Total_Cost_USD")
 
-# Also show Tier1, Tier2, Benefit
 c5, c6 = st.columns(2)
 with c5:
     bar_chart("Tier 1 Cost [USD]", "GFI_Tier_1_Cost_USD")
@@ -540,9 +578,24 @@ bar_chart("Benefit [USD] (negative = credit)", "GFI_Benefit_USD")
 buf = io.BytesIO()
 with pd.ExcelWriter(buf, engine="openpyxl") as xw:
     pd.DataFrame({
-        "Parameter": ["HFO_t","LFO_t","MDO_t","OTH_t","WtW_HFO","WtW_LFO","WtW_MDO","WtW_OTH","LCV_HFO","LCV_LFO","LCV_MDO","LCV_OTH","PREMIUM"],
-        "Value": [HFO_t,LFO_t,MDO_t,OTH_t,WtW_HFO,WtW_LFO,WtW_MDO,WtW_OTH,LCV_HFO,LCV_LFO,LCV_MDO,LCV_OTH,PREMIUM],
-        "Units": ["t","t","t","t","g/MJ","g/MJ","g/MJ","g/MJ","MJ/t","MJ/t","MJ/t","MJ/t","USD/t"],
+        "Parameter": [
+            "HFO_t","LFO_t","MDO_t","OTH_t",
+            "WtW_HFO","WtW_LFO","WtW_MDO","WtW_OTH",
+            "LCV_HFO","LCV_LFO","LCV_MDO","LCV_OTH",
+            "Premium (Others − Selected Fuel)","Selected fuel to reduce"
+        ],
+        "Value": [
+            HFO_t,LFO_t,MDO_t,OTH_t,
+            WtW_HFO,WtW_LFO,WtW_MDO,WtW_OTH,
+            LCV_HFO,LCV_LFO,LCV_MDO,LCV_OTH,
+            PREMIUM, reduce_choice
+        ],
+        "Units": [
+            "t","t","t","t",
+            "g/MJ","g/MJ","g/MJ","g/MJ",
+            "MJ/t","MJ/t","MJ/t","MJ/t",
+            "USD/t","—"
+        ],
     }).to_excel(xw, sheet_name="Inputs", index=False)
     res_df.to_excel(xw, sheet_name="Results_2028_2035", index=False)
 
@@ -553,4 +606,4 @@ st.download_button(
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
 
-st.caption("© 2025 — Single-vessel GFI optimizer. All constants and logic aligned with your original script.")
+st.caption("© 2025 — Single-vessel GFI optimizer. Logic and outputs remain as in the original; only the optimization now allows selecting HFO/LFO/MDO-MGO as the reduced fuel.")
