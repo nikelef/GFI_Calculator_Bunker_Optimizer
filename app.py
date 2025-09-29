@@ -295,8 +295,8 @@ def optimize_energy_neutral(
 # ──────────────────────────────────────────────────────────────────────────────
 # UI — Streamlit
 # ──────────────────────────────────────────────────────────────────────────────
-st.set_page_config(page_title="GFI Calculator - Bunkering Optimizer —  TMS DRY - NE ", layout="wide")
-st.title("GFI Calculator - Bunkering Optimizer —  TMS DRY - NE ")
+st.set_page_config(page_title="GFI Calculator - Bunkering Optimizer - TMS DRY - NE ", layout="wide")
+st.title("GFI Calculator - Bunkering Optimizer - TMS DRY - NE ")
 
 with st.expander("Methodology & Units", expanded=False):
     st.markdown(
