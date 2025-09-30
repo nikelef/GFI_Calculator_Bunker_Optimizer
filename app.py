@@ -86,10 +86,10 @@ DEFAULTS_PATH = ".gfi_bunkering_defaults.json"
 
 # Labels (Cf just for UI display)
 CF_LABELS = {
-    "HFO": "HFO (Cf: 3.114)",
-    "LFO": "LFO (Cf: 3.151)",
-    "MDO": "MDO/MGO (Cf: 3.206)",
-    "OTH": "Others (Cf: —)",
+    "HFO": "HFO",
+    "LFO": "LFO",
+    "MDO": "MDO/MGO",
+    "OTH": "Biofuel",
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
