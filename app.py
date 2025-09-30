@@ -214,9 +214,9 @@ def optimize_energy_neutral(
     fi: FuelInputs,
     year: int,
     reduce_fuel: str = "HFO",  # "HFO" | "LFO" | "MDO/MGO"
-    coarse_steps: int = 200,
+    coarse_steps: int = 1000,
     fine_window: float = 0.02,
-    fine_step: float = 0.001,
+    fine_step: float = 0.0005,
 ) -> Tuple[float, float, float, float, float]:
     """Per-year optimization.
 
