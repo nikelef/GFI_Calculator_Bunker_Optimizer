@@ -300,24 +300,24 @@ states = load_defaults()
 st.sidebar.header("Inputs")
 
 colA, colB = st.sidebar.columns(2)
-HFO_t = colA.number_input(f"{CF_LABELS['HFO']} (tons)", min_value=0.0, value=float(states.get("HFO_t", 100.0)), step=0.1)
-LFO_t = colB.number_input(f"{CF_LABELS['LFO']} (tons)", min_value=0.0, value=float(states.get("LFO_t", 0.0)), step=0.1)
-MDO_t = colA.number_input(f"{CF_LABELS['MDO']} (tons)", min_value=0.0, value=float(states.get("MDO_t", 0.0)), step=0.1)
-BIO_t = colB.number_input(f"{CF_LABELS['BIO']} (tons)", min_value=0.0, value=float(states.get("BIO_t", 0.0)), step=0.1)
+HFO_t = colA.number_input(f"{CF_LABELS['HFO']} (tons)", min_value=0.0, value=float(states.get("HFO_t", 100.0)), step=0.1, format="%.2f")
+LFO_t = colB.number_input(f"{CF_LABELS['LFO']} (tons)", min_value=0.0, value=float(states.get("LFO_t", 0.0)), step=0.1, format="%.2f")
+MDO_t = colA.number_input(f"{CF_LABELS['MDO']} (tons)", min_value=0.0, value=float(states.get("MDO_t", 0.0)), step=0.1, format="%.2f")
+BIO_t = colB.number_input(f"{CF_LABELS['BIO']} (tons)", min_value=0.0, value=float(states.get("BIO_t", 0.0)), step=0.1, format="%.2f")
 
 st.sidebar.markdown("---")
 colC, colD = st.sidebar.columns(2)
-WtW_HFO = colC.number_input("WtW HFO [gCO₂e/MJ]", min_value=0.0, value=float(states.get("WtW_HFO", 92.784)), step=0.001, format="%.3f")
-WtW_LFO = colD.number_input("WtW LFO [gCO₂e/MJ]", min_value=0.0, value=float(states.get("WtW_LFO", 91.251)), step=0.001, format="%.3f")
-WtW_MDO = colC.number_input("WtW MDO/MGO [gCO₂e/MJ]", min_value=0.0, value=float(states.get("WtW_MDO", 93.932)), step=0.001, format="%.3f")
-WtW_BIO = colD.number_input("WtW BIO [gCO₂e/MJ]", min_value=0.0, value=float(states.get("WtW_BIO", 70.366)), step=0.001, format="%.3f")
+WtW_HFO = colC.number_input("WtW HFO [gCO₂e/MJ]", min_value=0.0, value=float(states.get("WtW_HFO", 92.784)), step=0.001, format="%.2f")
+WtW_LFO = colD.number_input("WtW LFO [gCO₂e/MJ]", min_value=0.0, value=float(states.get("WtW_LFO", 91.251)), step=0.001, format="%.2f")
+WtW_MDO = colC.number_input("WtW MDO/MGO [gCO₂e/MJ]", min_value=0.0, value=float(states.get("WtW_MDO", 93.932)), step=0.001, format="%.2f")
+WtW_BIO = colD.number_input("WtW BIO [gCO₂e/MJ]", min_value=0.0, value=float(states.get("WtW_BIO", 70.366)), step=0.001, format="%.2f")
 
 st.sidebar.markdown("---")
 colE, colF = st.sidebar.columns(2)
-LCV_HFO = colE.number_input("LCV HFO [MJ/ton]", min_value=0.0, value=float(states.get("LCV_HFO", 40200.0)), step=100.0)
-LCV_LFO = colF.number_input("LCV LFO [MJ/ton]", min_value=0.0, value=float(states.get("LCV_LFO", 41000.0)), step=100.0)
-LCV_MDO = colE.number_input("LCV MDO/MGO [MJ/ton]", min_value=0.0, value=float(states.get("LCV_MDO", 42700.0)), step=100.0)
-LCV_BIO = colF.number_input("LCV BIO [MJ/ton]", min_value=0.0, value=float(states.get("LCV_BIO", 37000.0)), step=100.0)
+LCV_HFO = colE.number_input("LCV HFO [MJ/ton]", min_value=0.0, value=float(states.get("LCV_HFO", 40200.0)), step=100.0, format="%.2f")
+LCV_LFO = colF.number_input("LCV LFO [MJ/ton]", min_value=0.0, value=float(states.get("LCV_LFO", 41000.0)), step=100.0, format="%.2f")
+LCV_MDO = colE.number_input("LCV MDO/MGO [MJ/ton]", min_value=0.0, value=float(states.get("LCV_MDO", 42700.0)), step=100.0, format="%.2f")
+LCV_BIO = colF.number_input("LCV BIO [MJ/ton]", min_value=0.0, value=float(states.get("LCV_BIO", 37000.0)), step=100.0, format="%.2f")
 
 st.sidebar.markdown("---")
 reduce_choice = st.sidebar.selectbox(
@@ -330,7 +330,8 @@ PREMIUM = st.sidebar.number_input(
     f"Premium [USD/ton] (Biofuel − {reduce_choice})",
     min_value=0.0,
     value=float(states.get("PREMIUM", 305.0)),
-    step=10.0
+    step=10.0,
+    format="%.2f"
 )
 
 if st.sidebar.button("Save as defaults", use_container_width=True):
@@ -358,8 +359,8 @@ TOTAL_MJ = fi.total_MJ()
 GFI = fi.gfi()
 
 kpi1, kpi2 = st.columns(2)
-kpi1.metric("GFI (gCO₂e/MJ)", f"{GFI:.3f}")
-kpi2.metric("Total energy (MJ)", f"{TOTAL_MJ:,.0f}")
+kpi1.metric("GFI (gCO₂e/MJ)", f"{GFI:,.2f}")
+kpi2.metric("Total energy (MJ)", f"{TOTAL_MJ:,.2f}")
 
 # Step-wise targets plot
 X_STEP = YEARS + [YEARS[-1] + 1]
@@ -382,6 +383,7 @@ fig.update_layout(
     yaxis=dict(tickfont=dict(size=10)),
     legend=dict(orientation="h", y=-0.25)
 )
+fig.update_yaxes(tickformat=",.2f")
 st.plotly_chart(fig, use_container_width=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -443,16 +445,16 @@ res_df = res_df[[
 st.subheader("Per-Year Results (2028–2035)")
 st.dataframe(
     res_df.style.format({
-        "GFI (g/MJ)": "{:.3f}",
-        "GFI_Deficit_Surplus_tCO2eq": "{:.3f}",
-        "GFI_Tier_1_Cost_USD": "{:,.0f}",
-        "GFI_Tier_2_Cost_USD": "{:,.0f}",
-        "GFI_Benefit_USD": "{:,.0f}",
-        "Regulatory_Cost_USD": "{:,.0f}",
-        "Premium_Fuel_Cost_USD": "{:,.0f}",
-        "Total_Cost_USD": "{:,.0f}",
-        red_col_name: "{:.3f}",
-        "Bio_Fuel_Increase_For_Opt_Cost_t": "{:.3f}",
+        "GFI (g/MJ)": "{:,.2f}",
+        "GFI_Deficit_Surplus_tCO2eq": "{:,.2f}",
+        "GFI_Tier_1_Cost_USD": "{:,.2f}",
+        "GFI_Tier_2_Cost_USD": "{:,.2f}",
+        "GFI_Benefit_USD": "{:,.2f}",
+        "Regulatory_Cost_USD": "{:,.2f}",
+        "Premium_Fuel_Cost_USD": "{:,.2f}",
+        "Total_Cost_USD": "{:,.2f}",
+        red_col_name: "{:,.2f}",
+        "Bio_Fuel_Increase_For_Opt_Cost_t": "{:,.2f}",
     }),
     use_container_width=True, height=360
 )
@@ -462,13 +464,13 @@ st.dataframe(
 # ──────────────────────────────────────────────────────────────────────────────
 def bar_chart(title: str, ycol: str):
     fmt_map = {
-        "GFI_Deficit_Surplus_tCO2eq": ",.1f",
-        "Regulatory_Cost_USD": ",.0f",
-        "Premium_Fuel_Cost_USD": ",.0f",
-        "Total_Cost_USD": ",.0f",
-        "GFI_Tier_1_Cost_USD": ",.0f",
-        "GFI_Tier_2_Cost_USD": ",.0f",
-        "GFI_Benefit_USD": ",.0f",
+        "GFI_Deficit_Surplus_tCO2eq": ",.2f",
+        "Regulatory_Cost_USD": ",.2f",
+        "Premium_Fuel_Cost_USD": ",.2f",
+        "Total_Cost_USD": ",.2f",
+        "GFI_Tier_1_Cost_USD": ",.2f",
+        "GFI_Tier_2_Cost_USD": ",.2f",
+        "GFI_Benefit_USD": ",.2f",
     }
     textfmt = fmt_map.get(ycol, ",.2f")
 
@@ -490,6 +492,8 @@ def bar_chart(title: str, ycol: str):
         uniformtext_minsize=9,
         uniformtext_mode="hide"
     )
+    figb.update_yaxes(tickformat=",.2f")
+
     yvals = res_df[ycol].astype(float)
     if not yvals.empty:
         ymax = float(yvals.max())
