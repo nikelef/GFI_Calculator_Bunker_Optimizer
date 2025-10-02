@@ -63,7 +63,7 @@ CF_LABELS = {
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Data & utils
+# Data & defaults
 # ──────────────────────────────────────────────────────────────────────────────
 @dataclass
 class FuelInputs:
@@ -128,6 +128,144 @@ def save_defaults(dct: Dict) -> None:
 # Targets
 GFI_BASE = {yr: (1 - ZT_BASE[yr] / 100.0) * GFI2008 for yr in YEARS}
 GFI_DIRECT = {yr: (1 - ZT_DIRECT[yr] / 100.0) * GFI2008 for yr in YEARS}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Core calculations (defined BEFORE any usage)
+# ──────────────────────────────────────────────────────────────────────────────
+def deficit_surplus_tCO2eq(gfi_g_per_MJ: float, total_MJ: float, year: int) -> float:
+    """GFI_Deficit_Surplus_year in tCO2eq. Positive = deficit, Negative = surplus."""
+    if total_MJ <= 0:
+        return 0.0
+
+    base = GFI_BASE[year]
+    direct = GFI_DIRECT[year]
+
+    if gfi_g_per_MJ > base:
+        g_g = (gfi_g_per_MJ - direct) * total_MJ
+    elif gfi_g_per_MJ >= direct:
+        g_g = (gfi_g_per_MJ - direct) * total_MJ
+    else:
+        g_g = (gfi_g_per_MJ - direct) * total_MJ  # negative surplus
+
+    return g_g / 1e6  # grams → tonnes
+
+
+def tier_costs_usd(gfi_g_per_MJ: float, total_MJ: float, year: int) -> Tuple[float, float, float]:
+    """Return (Tier1 USD, Tier2 USD, Benefit USD). Benefit negative below Direct."""
+    if total_MJ <= 0:
+        return 0.0, 0.0, 0.0
+
+    base = GFI_BASE[year]
+    direct = GFI_DIRECT[year]
+
+    if gfi_g_per_MJ > base:
+        tier1_mt = (base - direct) * total_MJ / 1e6
+        tier2_mt = (gfi_g_per_MJ - base) * total_MJ / 1e6
+        benefit_mt = 0.0
+    elif gfi_g_per_MJ >= direct:
+        tier1_mt = (gfi_g_per_MJ - direct) * total_MJ / 1e6
+        tier2_mt = 0.0
+        benefit_mt = 0.0
+    else:
+        tier1_mt = 0.0
+        tier2_mt = 0.0
+        benefit_mt = (gfi_g_per_MJ - direct) * total_MJ / 1e6  # negative
+
+    t1_usd = tier1_mt * TIER1_COST
+    t2_usd = tier2_mt * TIER2_COST
+    ben_usd = benefit_mt * BENEFIT_RATE
+    return t1_usd, t2_usd, ben_usd
+
+
+def optimize_energy_neutral(
+    fi: FuelInputs,
+    year: int,
+    reduce_fuel: str = "HFO",  # "HFO" | "LFO" | "MDO/MGO"
+    coarse_steps: int = 200,    # accepted for compatibility (unused)
+    fine_window: float = 0.02,  # accepted for compatibility (unused)
+    fine_step: float = 0.001,   # accepted for compatibility (unused)
+) -> Tuple[float, float, float, float, float]:
+    """
+    Closed-form optimizer: TotalCost(f) is piecewise-linear in f with kinks only at
+    GFI == Direct_y and GFI == Base_y. Therefore the global minimum lies in
+    {0, f_direct, f_base, 1}. Returns:
+    (selected_fuel_reduction_t, bio_increase_t, gfi_new, reg_cost_usd, premium_cost_usd)
+    """
+    # Map selected fuel
+    if reduce_fuel == "HFO":
+        sel_mass0, sel_lcv, sel_wtw = fi.HFO_t, fi.LCV_HFO, fi.WtW_HFO
+    elif reduce_fuel == "LFO":
+        sel_mass0, sel_lcv, sel_wtw = fi.LFO_t, fi.LCV_LFO, fi.WtW_LFO
+    else:  # "MDO/MGO"
+        sel_mass0, sel_lcv, sel_wtw = fi.MDO_t, fi.LCV_MDO, fi.WtW_MDO
+
+    D0 = fi.total_MJ()
+    if sel_mass0 <= 0 or fi.LCV_BIO <= 0 or D0 <= 0:
+        return 0.0, 0.0, fi.gfi(), 0.0, 0.0
+
+    # GFI(f) = G0 + s*f
+    G0 = fi.gfi()
+    s = (sel_mass0 * sel_lcv / D0) * (fi.WtW_BIO - sel_wtw)
+
+    def eval_total(f: float) -> Tuple[float, float, float, float, float]:
+        # New masses after reducing selected fuel by fraction f and increasing BIO for energy neutrality
+        sel_new = sel_mass0 * (1.0 - f)
+        d_sel = sel_mass0 - sel_new
+        bio_new = fi.BIO_t + (d_sel * sel_lcv) / fi.LCV_BIO
+
+        hfo_new, lfo_new, mdo_new = fi.HFO_t, fi.LFO_t, fi.MDO_t
+        if reduce_fuel == "HFO":
+            hfo_new = sel_new
+        elif reduce_fuel == "LFO":
+            lfo_new = sel_new
+        else:
+            mdo_new = sel_new
+
+        total_MJ = (
+            hfo_new * fi.LCV_HFO
+            + lfo_new * fi.LCV_LFO
+            + mdo_new * fi.LCV_MDO
+            + bio_new * fi.LCV_BIO
+        )
+
+        if total_MJ <= 0:
+            return np.inf, 0.0, 0.0, 0.0, 0.0
+
+        num_g = (
+            hfo_new * fi.LCV_HFO * fi.WtW_HFO
+            + lfo_new * fi.LCV_LFO * fi.WtW_LFO
+            + mdo_new * fi.LCV_MDO * fi.WtW_MDO
+            + bio_new * fi.LCV_BIO * fi.WtW_BIO
+        )
+        gfi_new = num_g / total_MJ
+
+        t1, t2, ben = tier_costs_usd(gfi_new, total_MJ, year)
+        reg_cost = t1 + t2 + ben
+        premium_cost = max(bio_new - fi.BIO_t, 0.0) * fi.PREMIUM
+        total_cost = reg_cost + premium_cost
+        return total_cost, gfi_new, reg_cost, premium_cost, d_sel
+
+    # Candidate fractions
+    candidates: List[float] = [0.0, 1.0]
+    if abs(s) > 0:
+        f_direct = (GFI_DIRECT[year] - G0) / s
+        f_base = (GFI_BASE[year] - G0) / s
+        if 0.0 <= f_direct <= 1.0:
+            candidates.append(float(f_direct))
+        if 0.0 <= f_base <= 1.0:
+            candidates.append(float(f_base))
+
+    best = None
+    for f in candidates:
+        tot, gfi_new, reg, prem, d_sel = eval_total(f)
+        if (best is None) or (tot < best[0] - 1e-12):
+            best = (tot, f, gfi_new, reg, prem, d_sel)
+
+    _, f_best, gfi_best, reg_best, prem_best, d_sel_best = best
+    sel_red = d_sel_best
+    bio_inc = (sel_red * sel_lcv) / fi.LCV_BIO if fi.LCV_BIO > 0 else 0.0
+    return sel_red, bio_inc, gfi_best, reg_best, prem_best
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # US-formatted numeric input helpers (commas + exactly two decimals) in SIDEBAR
@@ -196,7 +334,7 @@ with st.expander("Methodology & Units", expanded=False):
 # Load persisted defaults
 states = load_defaults()
 
-# Sidebar inputs (kept on the LEFT; now US-formatted in-place, and sidebar widened)
+# Sidebar inputs (left), US-formatted in place; sidebar widened
 st.sidebar.header("Inputs")
 
 colA, colB = st.sidebar.columns(2)
@@ -244,7 +382,9 @@ if st.sidebar.button("Save as defaults", use_container_width=True):
     save_defaults(new_states)
     st.sidebar.success("Defaults saved.")
 
-# Build inputs
+# ──────────────────────────────────────────────────────────────────────────────
+# Base metrics
+# ──────────────────────────────────────────────────────────────────────────────
 fi = FuelInputs(
     HFO_t=HFO_t, LFO_t=LFO_t, MDO_t=MDO_t, BIO_t=BIO_t,
     WtW_HFO=WtW_HFO, WtW_LFO=WtW_LFO, WtW_MDO=WtW_MDO, WtW_BIO=WtW_BIO,
@@ -252,9 +392,6 @@ fi = FuelInputs(
     PREMIUM=PREMIUM,
 )
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Base metrics
-# ──────────────────────────────────────────────────────────────────────────────
 TOTAL_MJ = fi.total_MJ()
 GFI = fi.gfi()
 
