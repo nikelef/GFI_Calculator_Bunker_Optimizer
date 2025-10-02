@@ -130,149 +130,49 @@ GFI_BASE = {yr: (1 - ZT_BASE[yr] / 100.0) * GFI2008 for yr in YEARS}
 GFI_DIRECT = {yr: (1 - ZT_DIRECT[yr] / 100.0) * GFI2008 for yr in YEARS}
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Core calculations
+# US-formatted numeric input helpers (commas + exactly two decimals) in SIDEBAR
 # ──────────────────────────────────────────────────────────────────────────────
-def deficit_surplus_tCO2eq(gfi_g_per_MJ: float, total_MJ: float, year: int) -> float:
-    """GFI_Deficit_Surplus_year in tCO2eq. Positive = deficit, Negative = surplus."""
-    if total_MJ <= 0:
-        return 0.0
+def _format_state_number(key: str, min_value: float = 0.0) -> None:
+    """Normalize st.session_state[key] to US format with two decimals."""
+    s = st.session_state.get(key, "")
+    s = (s or "").strip().replace(" ", "").replace(",", "")
+    try:
+        v = float(s)
+    except Exception:
+        v = float(st.session_state.get(f"__prev_{key}", min_value))
+    v = max(v, min_value)
+    st.session_state[f"__prev_{key}"] = v
+    st.session_state[key] = f"{v:,.2f}"
 
-    base = GFI_BASE[year]
-    direct = GFI_DIRECT[year]
-
-    if gfi_g_per_MJ > base:
-        # (GFI−Base + Base−Direct) * MJ
-        g_g = (gfi_g_per_MJ - direct) * total_MJ
-    elif gfi_g_per_MJ >= direct:
-        g_g = (gfi_g_per_MJ - direct) * total_MJ
-    else:
-        g_g = (gfi_g_per_MJ - direct) * total_MJ  # negative surplus
-
-    return g_g / 1e6  # grams → tonnes
-
-
-def tier_costs_usd(gfi_g_per_MJ: float, total_MJ: float, year: int) -> Tuple[float, float, float]:
-    """Return (Tier1 USD, Tier2 USD, Benefit USD). Benefit negative below Direct."""
-    if total_MJ <= 0:
-        return 0.0, 0.0, 0.0
-
-    base = GFI_BASE[year]
-    direct = GFI_DIRECT[year]
-
-    if gfi_g_per_MJ > base:
-        tier1_mt = (base - direct) * total_MJ / 1e6
-        tier2_mt = (gfi_g_per_MJ - base) * total_MJ / 1e6
-        benefit_mt = 0.0
-    elif gfi_g_per_MJ >= direct:
-        tier1_mt = (gfi_g_per_MJ - direct) * total_MJ / 1e6
-        tier2_mt = 0.0
-        benefit_mt = 0.0
-    else:
-        tier1_mt = 0.0
-        tier2_mt = 0.0
-        benefit_mt = (gfi_g_per_MJ - direct) * total_MJ / 1e6  # negative
-
-    t1_usd = tier1_mt * TIER1_COST
-    t2_usd = tier2_mt * TIER2_COST
-    ben_usd = benefit_mt * BENEFIT_RATE
-    return t1_usd, t2_usd, ben_usd
-
-
-def optimize_energy_neutral(
-    fi: FuelInputs,
-    year: int,
-    reduce_fuel: str = "HFO",  # "HFO" | "LFO" | "MDO/MGO"
-    coarse_steps: int = 200,    # accepted for compatibility (unused)
-    fine_window: float = 0.02,  # accepted for compatibility (unused)
-    fine_step: float = 0.001,   # accepted for compatibility (unused)
-) -> Tuple[float, float, float, float, float]:
+def us_number_input(label: str, default: float, key: str, *, container, min_value: float = 0.0) -> float:
     """
-    Closed-form optimizer: TotalCost(f) is piecewise-linear in f with kinks only at
-    GFI == Direct_y and GFI == Base_y. Therefore the global minimum lies in
-    {0, f_direct, f_base, 1}. Returns:
-    (selected_fuel_reduction_t, bio_increase_t, gfi_new, reg_cost_usd, premium_cost_usd)
+    Text input *inside the provided container* (e.g., st.sidebar columns) that shows
+    numbers as US formatted (1,234.56) with 2 decimals, while returning a clean float.
     """
-    # Map selected fuel
-    if reduce_fuel == "HFO":
-        sel_mass0, sel_lcv, sel_wtw = fi.HFO_t, fi.LCV_HFO, fi.WtW_HFO
-    elif reduce_fuel == "LFO":
-        sel_mass0, sel_lcv, sel_wtw = fi.LFO_t, fi.LCV_LFO, fi.WtW_LFO
-    else:  # "MDO/MGO"
-        sel_mass0, sel_lcv, sel_wtw = fi.MDO_t, fi.LCV_MDO, fi.WtW_MDO
-
-    D0 = fi.total_MJ()
-    if sel_mass0 <= 0 or fi.LCV_BIO <= 0 or D0 <= 0:
-        return 0.0, 0.0, fi.gfi(), 0.0, 0.0
-
-    # GFI(f) = G0 + s*f
-    G0 = fi.gfi()
-    s = (sel_mass0 * sel_lcv / D0) * (fi.WtW_BIO - sel_wtw)
-
-    def eval_total(f: float) -> Tuple[float, float, float, float, float]:
-        # New masses after reducing selected fuel by fraction f and increasing BIO for energy neutrality
-        sel_new = sel_mass0 * (1.0 - f)
-        d_sel = sel_mass0 - sel_new
-        bio_new = fi.BIO_t + (d_sel * sel_lcv) / fi.LCV_BIO
-
-        hfo_new, lfo_new, mdo_new = fi.HFO_t, fi.LFO_t, fi.MDO_t
-        if reduce_fuel == "HFO":
-            hfo_new = sel_new
-        elif reduce_fuel == "LFO":
-            lfo_new = sel_new
-        else:
-            mdo_new = sel_new
-
-        total_MJ = (
-            hfo_new * fi.LCV_HFO
-            + lfo_new * fi.LCV_LFO
-            + mdo_new * fi.LCV_MDO
-            + bio_new * fi.LCV_BIO
-        )
-
-        if total_MJ <= 0:
-            return np.inf, 0.0, 0.0, 0.0, 0.0
-
-        num_g = (
-            hfo_new * fi.LCV_HFO * fi.WtW_HFO
-            + lfo_new * fi.LCV_LFO * fi.WtW_LFO
-            + mdo_new * fi.LCV_MDO * fi.WtW_MDO
-            + bio_new * fi.LCV_BIO * fi.WtW_BIO
-        )
-        gfi_new = num_g / total_MJ
-
-        t1, t2, ben = tier_costs_usd(gfi_new, total_MJ, year)
-        reg_cost = t1 + t2 + ben
-        premium_cost = max(bio_new - fi.BIO_t, 0.0) * fi.PREMIUM
-        total_cost = reg_cost + premium_cost
-        return total_cost, gfi_new, reg_cost, premium_cost, d_sel
-
-    # Candidate fractions
-    candidates: List[float] = [0.0, 1.0]
-    if abs(s) > 0:
-        f_direct = (GFI_DIRECT[year] - G0) / s
-        f_base = (GFI_BASE[year] - G0) / s
-        if 0.0 <= f_direct <= 1.0:
-            candidates.append(float(f_direct))
-        if 0.0 <= f_base <= 1.0:
-            candidates.append(float(f_base))
-
-    best = None
-    for f in candidates:
-        tot, gfi_new, reg, prem, d_sel = eval_total(f)
-        if (best is None) or (tot < best[0] - 1e-12):
-            best = (tot, f, gfi_new, reg, prem, d_sel)
-
-    _, f_best, gfi_best, reg_best, prem_best, d_sel_best = best
-    sel_red = d_sel_best
-    bio_inc = (sel_red * sel_lcv) / fi.LCV_BIO if fi.LCV_BIO > 0 else 0.0
-    return sel_red, bio_inc, gfi_best, reg_best, prem_best
-
+    if key not in st.session_state:
+        st.session_state[key] = f"{float(default):,.2f}"
+        st.session_state[f"__prev_{key}"] = float(default)
+    container.text_input(label, key=key, on_change=_format_state_number, args=(key, min_value))
+    try:
+        return max(float(st.session_state[key].replace(",", "")), min_value)
+    except Exception:
+        return max(float(st.session_state.get(f"__prev_{key}", default)), min_value)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # UI — Streamlit
 # ──────────────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="GFI Calculator - Bunkering Optimizer 1.1 - TMS DRY", layout="wide")
 st.title("GFI Calculator - Bunkering Optimizer 1.1 -  TMS DRY")
+
+# Make the sidebar (input column) a bit wider
+st.markdown(
+    """
+    <style>
+    [data-testid="stSidebar"] { width: 420px; min-width: 420px; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 with st.expander("Methodology & Units", expanded=False):
     st.markdown(
@@ -296,28 +196,28 @@ with st.expander("Methodology & Units", expanded=False):
 # Load persisted defaults
 states = load_defaults()
 
-# Sidebar inputs
+# Sidebar inputs (kept on the LEFT; now US-formatted in-place, and sidebar widened)
 st.sidebar.header("Inputs")
 
 colA, colB = st.sidebar.columns(2)
-HFO_t = colA.number_input(f"{CF_LABELS['HFO']} (tons)", min_value=0.0, value=float(states.get("HFO_t", 100.0)), step=0.1, format="%.2f")
-LFO_t = colB.number_input(f"{CF_LABELS['LFO']} (tons)", min_value=0.0, value=float(states.get("LFO_t", 0.0)), step=0.1, format="%.2f")
-MDO_t = colA.number_input(f"{CF_LABELS['MDO']} (tons)", min_value=0.0, value=float(states.get("MDO_t", 0.0)), step=0.1, format="%.2f")
-BIO_t = colB.number_input(f"{CF_LABELS['BIO']} (tons)", min_value=0.0, value=float(states.get("BIO_t", 0.0)), step=0.1, format="%.2f")
+HFO_t = us_number_input(f"{CF_LABELS['HFO']} (tons)", float(states.get("HFO_t", 100.0)), key="inp_HFO_t", container=colA)
+LFO_t = us_number_input(f"{CF_LABELS['LFO']} (tons)", float(states.get("LFO_t", 0.0)), key="inp_LFO_t", container=colB)
+MDO_t = us_number_input(f"{CF_LABELS['MDO']} (tons)", float(states.get("MDO_t", 0.0)), key="inp_MDO_t", container=colA)
+BIO_t = us_number_input(f"{CF_LABELS['BIO']} (tons)", float(states.get("BIO_t", 0.0)), key="inp_BIO_t", container=colB)
 
 st.sidebar.markdown("---")
 colC, colD = st.sidebar.columns(2)
-WtW_HFO = colC.number_input("WtW HFO [gCO₂e/MJ]", min_value=0.0, value=float(states.get("WtW_HFO", 92.784)), step=0.001, format="%.2f")
-WtW_LFO = colD.number_input("WtW LFO [gCO₂e/MJ]", min_value=0.0, value=float(states.get("WtW_LFO", 91.251)), step=0.001, format="%.2f")
-WtW_MDO = colC.number_input("WtW MDO/MGO [gCO₂e/MJ]", min_value=0.0, value=float(states.get("WtW_MDO", 93.932)), step=0.001, format="%.2f")
-WtW_BIO = colD.number_input("WtW BIO [gCO₂e/MJ]", min_value=0.0, value=float(states.get("WtW_BIO", 70.366)), step=0.001, format="%.2f")
+WtW_HFO = us_number_input("WtW HFO [gCO₂e/MJ]", float(states.get("WtW_HFO", 92.784)), key="inp_WtW_HFO", container=colC)
+WtW_LFO = us_number_input("WtW LFO [gCO₂e/MJ]", float(states.get("WtW_LFO", 91.251)), key="inp_WtW_LFO", container=colD)
+WtW_MDO = us_number_input("WtW MDO/MGO [gCO₂e/MJ]", float(states.get("WtW_MDO", 93.932)), key="inp_WtW_MDO", container=colC)
+WtW_BIO = us_number_input("WtW BIO [gCO₂e/MJ]", float(states.get("WtW_BIO", 70.366)), key="inp_WtW_BIO", container=colD)
 
 st.sidebar.markdown("---")
 colE, colF = st.sidebar.columns(2)
-LCV_HFO = colE.number_input("LCV HFO [MJ/ton]", min_value=0.0, value=float(states.get("LCV_HFO", 40200.0)), step=100.0, format="%.2f")
-LCV_LFO = colF.number_input("LCV LFO [MJ/ton]", min_value=0.0, value=float(states.get("LCV_LFO", 41000.0)), step=100.0, format="%.2f")
-LCV_MDO = colE.number_input("LCV MDO/MGO [MJ/ton]", min_value=0.0, value=float(states.get("LCV_MDO", 42700.0)), step=100.0, format="%.2f")
-LCV_BIO = colF.number_input("LCV BIO [MJ/ton]", min_value=0.0, value=float(states.get("LCV_BIO", 37000.0)), step=100.0, format="%.2f")
+LCV_HFO = us_number_input("LCV HFO [MJ/ton]", float(states.get("LCV_HFO", 40200.0)), key="inp_LCV_HFO", container=colE)
+LCV_LFO = us_number_input("LCV LFO [MJ/ton]", float(states.get("LCV_LFO", 41000.0)), key="inp_LCV_LFO", container=colF)
+LCV_MDO = us_number_input("LCV MDO/MGO [MJ/ton]", float(states.get("LCV_MDO", 42700.0)), key="inp_LCV_MDO", container=colE)
+LCV_BIO = us_number_input("LCV BIO [MJ/ton]", float(states.get("LCV_BIO", 37000.0)), key="inp_LCV_BIO", container=colF)
 
 st.sidebar.markdown("---")
 reduce_choice = st.sidebar.selectbox(
@@ -326,12 +226,12 @@ reduce_choice = st.sidebar.selectbox(
     index=int(states.get("reduce_idx", 0))
 )
 
-PREMIUM = st.sidebar.number_input(
+PREMIUM = us_number_input(
     f"Premium [USD/ton] (Biofuel − {reduce_choice})",
-    min_value=0.0,
-    value=float(states.get("PREMIUM", 305.0)),
-    step=10.0,
-    format="%.2f"
+    float(states.get("PREMIUM", 305.0)),
+    key="inp_PREMIUM",
+    container=st.sidebar,
+    min_value=0.0
 )
 
 if st.sidebar.button("Save as defaults", use_container_width=True):
