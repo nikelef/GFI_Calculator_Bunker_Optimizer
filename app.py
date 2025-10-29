@@ -569,7 +569,7 @@ with c5:
 with c6:
     bar_chart("Tier 2 Cost [USD]", "GFI_Tier_2_Cost_USD")
 
-bar_chart("Benefit [USD] (negative = credit)", "GFI_Benefit_USD")
+bar_chart("Benefit [USD] In case below the Direct Target (negative = credit)", "GFI_Benefit_USD")
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Download Excel
