@@ -484,7 +484,7 @@ res_df = res_df[[
     "Total_Cost_USD",
     red_col_name,
     "Bio_Fuel_Increase_For_Opt_Cost_t",
-    "Total_Cost_USD_Opt",  # ← now last
+    "Total_Cost_USD_Opt",  # ← last
 ]]
 
 st.subheader("Per-Year Results (2028–2035)")
@@ -506,7 +506,12 @@ st.dataframe(
 )
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Compact bar charts
+# Compact bar charts (re-ordered)
+#   Order requested:
+#   1) Core charts
+#   2) Total Cost [USD] (at the end, above Benefit)
+#   3) Optimized Total Cost [USD] (after Total Cost, above Benefit)
+#   4) Benefit [USD] last
 # ──────────────────────────────────────────────────────────────────────────────
 def bar_chart(title: str, ycol: str):
     fmt_map = {
@@ -514,6 +519,7 @@ def bar_chart(title: str, ycol: str):
         "Regulatory_Cost_USD": ",.2f",
         "Premium_Fuel_Cost_USD": ",.2f",
         "Total_Cost_USD": ",.2f",
+        "Total_Cost_USD_Opt": ",.2f",
         "GFI_Tier_1_Cost_USD": ",.2f",
         "GFI_Tier_2_Cost_USD": ",.2f",
         "GFI_Benefit_USD": ",.2f",
@@ -551,6 +557,7 @@ def bar_chart(title: str, ycol: str):
 
     st.plotly_chart(figb, use_container_width=True)
 
+# Core charts in two-column rows
 c1, c2 = st.columns(2)
 with c1:
     bar_chart("GFI Deficit/Surplus [tCO₂e]", "GFI_Deficit_Surplus_tCO2eq")
@@ -561,15 +568,18 @@ c3, c4 = st.columns(2)
 with c3:
     bar_chart("Premium Fuel Cost [USD]", "Premium_Fuel_Cost_USD")
 with c4:
-    bar_chart("Total Cost [USD]", "Total_Cost_USD")
+    bar_chart("Tier 1 Cost [USD]", "GFI_Tier_1_Cost_USD")
 
 c5, c6 = st.columns(2)
 with c5:
-    bar_chart("Tier 1 Cost [USD]", "GFI_Tier_1_Cost_USD")
-with c6:
     bar_chart("Tier 2 Cost [USD]", "GFI_Tier_2_Cost_USD")
 
-bar_chart("Benefit [USD] In case below the Direct Target (negative = credit)", "GFI_Benefit_USD")
+# Move Total Cost charts to the end (above Benefit)
+bar_chart("Total Cost [USD]", "Total_Cost_USD")
+bar_chart("Total Cost (Optimized) [USD]", "Total_Cost_USD_Opt")
+
+# Benefit last
+bar_chart("Benefit [USD] (negative = credit)", "GFI_Benefit_USD")
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Download Excel
