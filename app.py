@@ -365,7 +365,7 @@ reduce_choice = st.sidebar.selectbox(
 )
 
 PREMIUM = us_number_input(
-    f"Premium [USD/ton] (Biofuel − {reduce_choice})",
+    f"Premium [USD/ton] (Biofuel Cost - {reduce_choice} cost)",
     float(states.get("PREMIUM", 305.0)),
     key="inp_PREMIUM",
     container=st.sidebar,
