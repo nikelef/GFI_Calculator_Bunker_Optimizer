@@ -359,7 +359,7 @@ LCV_BIO = us_number_input("LCV BIO [MJ/ton]", float(states.get("LCV_BIO", 37000.
 
 st.sidebar.markdown("---")
 reduce_choice = st.sidebar.selectbox(
-    "Fuel to reduce (for optimization)",
+    "Fuel to reduce (for optimization). BIO will replace it cosnidering constant energy ",
     options=["HFO", "LFO", "MDO/MGO"],
     index=int(states.get("reduce_idx", 0))
 )
