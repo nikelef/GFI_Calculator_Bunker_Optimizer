@@ -300,7 +300,7 @@ def us_number_input(label: str, default: float, key: str, *, container, min_valu
 # UI — Streamlit
 # ──────────────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="GFI Calculator - Bunkering Optimizer", layout="wide")
-st.title("GFI Calculator - Bunkering Optimizer 1.1 - TMS DRY - ENVIRONMENTAL")
+st.title("GFI Calculator - Bunkering Optimizer")
 
 # Make the sidebar (input column) a bit wider
 st.markdown(
