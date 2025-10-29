@@ -317,15 +317,15 @@ with st.expander("Methodology & Units", expanded=False):
         r"""
 **Formulas:**
 
-- **GFI** \[gCO₂e/MJ] = \(\frac{\sum_i m_i \cdot LCV_i \cdot WtW_i}{\sum_i m_i \cdot LCV_i}\)
+- **GFI** \[gCO₂e/MJ] = {sum_i m_i * LCV_i * WtW_i}/ {sum_i m_i * LCV_i)
 - **Deficit/Surplus** \[tCO₂e] for year *y*:
   - If \(GFI > Base_y\): \((GFI−Direct_y)\cdot TotalMJ / 10^6\)
   - If \(Direct_y \le GFI \le Base_y\): \((GFI−Direct_y)\cdot TotalMJ / 10^6\)
   - If \(GFI < Direct_y\): \((GFI−Direct_y)\cdot TotalMJ / 10^6\) (negative surplus)
-- **Tier costs** \[USD]: Tier-1 = 100, Tier-2 = 380, Benefit = 190 × (negative mass)
+- **Tier costs default values** \[USD per tCO2eq]: Tier-1 = 100, Tier-2 = 380, Benefit = 190 × (negative mass)
 - **Optimization (per year)**: reduce **selected fuel (HFO/LFO/MDO-MGO)** by Δt and
   increase **BIO** by Δt·LCV_sel/LCV_BIO (energy-neutral). Objective:
-  minimize \(Tier1 + Tier2 + Benefit + Premium \cdot \max(\Delta BIO,0)\).
+  minimize (Tier1 + Tier2 + Benefit + Premium)
 
 **Units**: Mass in tons; LCV in MJ/ton; WtW in gCO₂e/MJ.
 """
