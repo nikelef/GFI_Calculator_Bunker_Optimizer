@@ -317,15 +317,15 @@ with st.expander("Methodology & Units", expanded=False):
         r"""
 **Formulas:**
 
-- **GFI** \[gCO₂e/MJ] = {sum_i m_i * LCV_i * WtW_i}/ {sum_i m_i * LCV_i)
+- **GFI** \[gCO₂e/MJ] = \(\frac{\sum_i m_i \cdot LCV_i \cdot WtW_i}{\sum_i m_i \cdot LCV_i}\)
 - **Deficit/Surplus** \[tCO₂e] for year *y*:
   - If \(GFI > Base_y\): \((GFI−Direct_y)\cdot TotalMJ / 10^6\)
   - If \(Direct_y \le GFI \le Base_y\): \((GFI−Direct_y)\cdot TotalMJ / 10^6\)
   - If \(GFI < Direct_y\): \((GFI−Direct_y)\cdot TotalMJ / 10^6\) (negative surplus)
-- **Tier costs default values** \[USD per tCO2eq]: Tier-1 = 100, Tier-2 = 380, Benefit = 190 × (negative mass)
+- **Tier costs default values** \[USD per tCO₂e]: Tier-1 = 100, Tier-2 = 380, Benefit = 190 × (negative mass)
 - **Optimization (per year)**: reduce **selected fuel (HFO/LFO/MDO-MGO)** by Δt and
   increase **BIO** by Δt·LCV_sel/LCV_BIO (energy-neutral). Objective:
-  minimize (Tier1 + Tier2 + Benefit + Premium)
+  minimize \( \text{Tier1} + \text{Tier2} + \text{Benefit} + \text{Premium} \).
 
 **Units**: Mass in tons; LCV in MJ/ton; WtW in gCO₂e/MJ.
 """
@@ -365,7 +365,7 @@ reduce_choice = st.sidebar.selectbox(
     index=int(states.get("reduce_idx", 0))
 )
 
-# NEW: Cost rates inputs (below LCVs, above Premium)
+# Cost rates inputs (below LCVs, above Premium)
 st.sidebar.markdown("**Cost rates [USD per tCO₂e]**")
 colG, colH, colI = st.sidebar.columns(3)
 TIER1_COST = us_number_input("Tier 1", float(states.get("TIER1_COST", 100.0)), key="inp_TIER1_COST", container=colG, min_value=0.0)
@@ -411,7 +411,7 @@ kpi1, kpi2 = st.columns(2)
 kpi1.metric("GFI (gCO₂e/MJ)", f"{GFI:,.2f}")
 kpi2.metric("Total energy (MJ)", f"{TOTAL_MJ:,.2f}")
 
-# Step-wise targets plot
+# Step-wise targets plot (with unified hover showing all traces)
 X_STEP = YEARS + [YEARS[-1] + 1]
 base_step = [GFI_BASE[y] for y in YEARS] + [GFI_BASE[YEARS[-1]]]
 direct_step = [GFI_DIRECT[y] for y in YEARS] + [GFI_DIRECT[YEARS[-1]]]
@@ -419,10 +419,29 @@ gfi_step = [GFI] * len(X_STEP)
 baseline_step = [GFI2008] * len(X_STEP)
 
 fig = go.Figure()
-fig.add_trace(go.Scatter(x=X_STEP, y=gfi_step, mode="lines", name="GFI attained", line=dict(width=2), line_shape="hv"))
-fig.add_trace(go.Scatter(x=X_STEP, y=base_step, mode="lines", name="Base target (step)", line=dict(dash="dash", width=2), line_shape="hv"))
-fig.add_trace(go.Scatter(x=X_STEP, y=direct_step, mode="lines", name="Direct target (step)", line=dict(dash="dot", width=2), line_shape="hv"))
-fig.add_trace(go.Scatter(x=X_STEP, y=baseline_step, mode="lines", name="Baseline 2008", line=dict(color="black", dash="longdash", width=2), line_shape="hv"))
+
+# Order traces top→bottom in hover: Baseline (top), GFI attained, Base target, Direct target (bottom)
+fig.add_trace(go.Scatter(
+    x=X_STEP, y=baseline_step, mode="lines", name="Baseline 2008",
+    line=dict(dash="longdash", width=2, color="black"), line_shape="hv",
+    hovertemplate="Baseline 2008: %{y:,.2f} gCO₂e/MJ<extra></extra>"
+))
+fig.add_trace(go.Scatter(
+    x=X_STEP, y=gfi_step, mode="lines", name="GFI attained",
+    line=dict(width=2), line_shape="hv",
+    hovertemplate="GFI attained: %{y:,.2f} gCO₂e/MJ<extra></extra>"
+))
+fig.add_trace(go.Scatter(
+    x=X_STEP, y=base_step, mode="lines", name="Base target (step)",
+    line=dict(dash="dash", width=2), line_shape="hv",
+    hovertemplate="Base target: %{y:,.2f} gCO₂e/MJ<extra></extra>"
+))
+fig.add_trace(go.Scatter(
+    x=X_STEP, y=direct_step, mode="lines", name="Direct target (step)",
+    line=dict(dash="dot", width=2), line_shape="hv",
+    hovertemplate="Direct target: %{y:,.2f} gCO₂e/MJ<extra></extra>"
+))
+
 fig.update_layout(
     height=260,
     margin=dict(l=6, r=6, t=26, b=4),
@@ -430,7 +449,9 @@ fig.update_layout(
     xaxis_title="Year",
     xaxis=dict(tickmode="array", tickvals=YEARS, tickfont=dict(size=10)),
     yaxis=dict(tickfont=dict(size=10)),
-    legend=dict(orientation="h", y=-0.25)
+    legend=dict(orientation="h", y=-0.25),
+    hovermode="x unified",
+    hoverlabel=dict(align="left", namelength=-1)
 )
 fig.update_yaxes(tickformat=",.2f")
 st.plotly_chart(fig, use_container_width=True)
