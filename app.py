@@ -359,7 +359,7 @@ LCV_BIO = us_number_input("LCV BIO [MJ/ton]", float(states.get("LCV_BIO", 37000.
 
 st.sidebar.markdown("---")
 reduce_choice = st.sidebar.selectbox(
-    "Fuel to reduce (for optimization). BIO will replace it considering constant energy ",
+    "Fuel to reduce (for optimization). BIO will replace it considering constant energy",
     options=["HFO", "LFO", "MDO/MGO"],
     index=int(states.get("reduce_idx", 0))
 )
@@ -441,12 +441,14 @@ for yr in YEARS:
         deficit_t = 0.0
         t1_usd = t2_usd = ben_usd = 0.0
         sel_red_t = bio_inc_t = 0.0
+        tot_cost_opt = 0.0
     else:
         deficit_t = deficit_surplus_tCO2eq(GFI, TOTAL_MJ, yr)
         t1_usd, t2_usd, ben_usd = tier_costs_usd(GFI, TOTAL_MJ, yr)
         sel_red_t, bio_inc_t, gfi_new, reg_cost_opt, premium_cost_opt = optimize_energy_neutral(
             fi, yr, reduce_fuel=reduce_choice
         )
+        tot_cost_opt = reg_cost_opt + premium_cost_opt  # ← final optimized cost
 
     rows.append({
         "Year": yr,
@@ -459,7 +461,8 @@ for yr in YEARS:
         "Regulatory_Cost_USD": t1_usd + t2_usd + ben_usd,
         "Premium_Fuel_Cost_USD": PREMIUM * BIO_t,
         "Total_Cost_USD": (t1_usd + t2_usd + ben_usd) + (PREMIUM * BIO_t),
-        # Optimization deltas at the end
+        # Optimization outputs
+        "Total_Cost_USD_Opt": tot_cost_opt,
         red_col_name: sel_red_t,
         "Bio_Fuel_Increase_For_Opt_Cost_t": bio_inc_t,
     })
@@ -475,6 +478,7 @@ res_df = res_df[[
     "Regulatory_Cost_USD",
     "Premium_Fuel_Cost_USD",
     "Total_Cost_USD",
+    "Total_Cost_USD_Opt",
     red_col_name,
     "Bio_Fuel_Increase_For_Opt_Cost_t",
 ]]
@@ -490,6 +494,7 @@ st.dataframe(
         "Regulatory_Cost_USD": "{:,.2f}",
         "Premium_Fuel_Cost_USD": "{:,.2f}",
         "Total_Cost_USD": "{:,.2f}",
+        "Total_Cost_USD_Opt": "{:,.2f}",
         red_col_name: "{:,.2f}",
         "Bio_Fuel_Increase_For_Opt_Cost_t": "{:,.2f}",
     }),
@@ -596,4 +601,4 @@ st.download_button(
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
 
-st.caption("© 2025 — Single-vessel GFI optimizer. Initial costs shown; optimization reports deltas (selected fuel reduction & BIO increase).")
+st.caption("© 2025 — Single-vessel GFI optimizer. Initial costs shown; optimization reports deltas and Total_Cost_USD_Opt.")
