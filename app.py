@@ -467,7 +467,11 @@ for yr in YEARS:
         "Bio_Fuel_Increase_For_Opt_Cost_t": bio_inc_t,
     })
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Per-year results table (place Total_Cost_USD_Opt at the END)
+# ──────────────────────────────────────────────────────────────────────────────
 res_df = pd.DataFrame(rows)
+
 res_df = res_df[[
     "Year",
     "GFI (g/MJ)",
@@ -478,9 +482,9 @@ res_df = res_df[[
     "Regulatory_Cost_USD",
     "Premium_Fuel_Cost_USD",
     "Total_Cost_USD",
-    "Total_Cost_USD_Opt",
     red_col_name,
     "Bio_Fuel_Increase_For_Opt_Cost_t",
+    "Total_Cost_USD_Opt",  # ← now last
 ]]
 
 st.subheader("Per-Year Results (2028–2035)")
@@ -494,9 +498,9 @@ st.dataframe(
         "Regulatory_Cost_USD": "{:,.2f}",
         "Premium_Fuel_Cost_USD": "{:,.2f}",
         "Total_Cost_USD": "{:,.2f}",
-        "Total_Cost_USD_Opt": "{:,.2f}",
         red_col_name: "{:,.2f}",
         "Bio_Fuel_Increase_For_Opt_Cost_t": "{:,.2f}",
+        "Total_Cost_USD_Opt": "{:,.2f}",
     }),
     use_container_width=True, height=360
 )
