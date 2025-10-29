@@ -325,7 +325,7 @@ with st.expander("Methodology & Units", expanded=False):
 - **Tier costs default values** \[USD per tCO₂e]: Tier-1 = 100, Tier-2 = 380, Benefit = 190 × (negative mass)
 - **Optimization (per year)**: reduce **selected fuel (HFO/LFO/MDO-MGO)** by Δt and
   increase **BIO** by Δt·LCV_sel/LCV_BIO (energy-neutral). Objective:
-  minimize \( \text{Tier1} + \text{Tier2} + \text{Benefit} + \text{Premium} \).
+  minimize (Tier1 + Tier2 + Benefit + Premium)
 
 **Units**: Mass in tons; LCV in MJ/ton; WtW in gCO₂e/MJ.
 """
