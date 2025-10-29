@@ -20,7 +20,7 @@ import plotly.express as px
 import streamlit as st
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Constants
+# Constants (defaults)
 # ──────────────────────────────────────────────────────────────────────────────
 GFI2008 = 93.3  # gCO2eq/MJ (baseline intensity)
 
@@ -46,7 +46,7 @@ ZT_DIRECT = {
 }
 YEARS = list(range(2028, 2036))
 
-# Cost rates (USD per tCO2eq)
+# Cost rates (USD per tCO2eq) — will be overridden by sidebar inputs
 TIER1_COST = 100.0
 TIER2_COST = 380.0
 BENEFIT_RATE = 190.0  # negative mass → negative $ (credit)
@@ -357,6 +357,7 @@ LCV_LFO = us_number_input("LCV LFO [MJ/ton]", float(states.get("LCV_LFO", 41000.
 LCV_MDO = us_number_input("LCV MDO/MGO [MJ/ton]", float(states.get("LCV_MDO", 42700.0)), key="inp_LCV_MDO", container=colE)
 LCV_BIO = us_number_input("LCV BIO [MJ/ton]", float(states.get("LCV_BIO", 37000.0)), key="inp_LCV_BIO", container=colF)
 
+# Fuel to reduce selector
 st.sidebar.markdown("---")
 reduce_choice = st.sidebar.selectbox(
     "Fuel to reduce (for optimization). BIO will replace it considering constant energy",
@@ -364,6 +365,15 @@ reduce_choice = st.sidebar.selectbox(
     index=int(states.get("reduce_idx", 0))
 )
 
+# NEW: Cost rates inputs (below LCVs, above Premium)
+st.sidebar.markdown("**Cost rates [USD per tCO₂e]**")
+colG, colH, colI = st.sidebar.columns(3)
+TIER1_COST = us_number_input("Tier 1", float(states.get("TIER1_COST", 100.0)), key="inp_TIER1_COST", container=colG, min_value=0.0)
+TIER2_COST = us_number_input("Tier 2", float(states.get("TIER2_COST", 380.0)), key="inp_TIER2_COST", container=colH, min_value=0.0)
+BENEFIT_RATE = us_number_input("Benefit", float(states.get("BENEFIT_RATE", 190.0)), key="inp_BENEFIT_RATE", container=colI, min_value=0.0)
+
+# Premium (placed after cost rates)
+st.sidebar.markdown("---")
 PREMIUM = us_number_input(
     f"Premium [USD/ton] (Biofuel Cost - {reduce_choice} cost)",
     float(states.get("PREMIUM", 305.0)),
@@ -372,11 +382,13 @@ PREMIUM = us_number_input(
     min_value=0.0
 )
 
+# Save defaults button
 if st.sidebar.button("Save as defaults", use_container_width=True):
     new_states = {
         "HFO_t": HFO_t, "LFO_t": LFO_t, "MDO_t": MDO_t, "BIO_t": BIO_t,
         "WtW_HFO": WtW_HFO, "WtW_LFO": WtW_LFO, "WtW_MDO": WtW_MDO, "WtW_BIO": WtW_BIO,
         "LCV_HFO": LCV_HFO, "LCV_LFO": LCV_LFO, "LCV_MDO": LCV_MDO, "LCV_BIO": LCV_BIO,
+        "TIER1_COST": TIER1_COST, "TIER2_COST": TIER2_COST, "BENEFIT_RATE": BENEFIT_RATE,
         "PREMIUM": PREMIUM, "reduce_idx": ["HFO", "LFO", "MDO/MGO"].index(reduce_choice)
     }
     save_defaults(new_states)
@@ -448,7 +460,7 @@ for yr in YEARS:
         sel_red_t, bio_inc_t, gfi_new, reg_cost_opt, premium_cost_opt = optimize_energy_neutral(
             fi, yr, reduce_fuel=reduce_choice
         )
-        tot_cost_opt = reg_cost_opt + premium_cost_opt  # ← final optimized cost
+        tot_cost_opt = reg_cost_opt + premium_cost_opt  # final optimized cost
 
     rows.append({
         "Year": yr,
@@ -471,7 +483,6 @@ for yr in YEARS:
 # Per-year results table (place Total_Cost_USD_Opt at the END)
 # ──────────────────────────────────────────────────────────────────────────────
 res_df = pd.DataFrame(rows)
-
 res_df = res_df[[
     "Year",
     "GFI (g/MJ)",
@@ -484,7 +495,7 @@ res_df = res_df[[
     "Total_Cost_USD",
     red_col_name,
     "Bio_Fuel_Increase_For_Opt_Cost_t",
-    "Total_Cost_USD_Opt",  # ← last
+    "Total_Cost_USD_Opt",  # last
 ]]
 
 st.subheader("Per-Year Results (2028–2035)")
@@ -506,12 +517,7 @@ st.dataframe(
 )
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Compact bar charts (re-ordered)
-#   Order requested:
-#   1) Core charts
-#   2) Total Cost [USD] (at the end, above Benefit)
-#   3) Optimized Total Cost [USD] (after Total Cost, above Benefit)
-#   4) Benefit [USD] last
+# Compact bar charts (requested order)
 # ──────────────────────────────────────────────────────────────────────────────
 def bar_chart(title: str, ycol: str):
     fmt_map = {
@@ -574,7 +580,7 @@ c5, c6 = st.columns(2)
 with c5:
     bar_chart("Tier 2 Cost [USD]", "GFI_Tier_2_Cost_USD")
 
-# Move Total Cost charts to the end (above Benefit)
+# Totals at the end (above Benefit)
 bar_chart("Total Cost [USD]", "Total_Cost_USD")
 bar_chart("Total Cost (Optimized) [USD]", "Total_Cost_USD_Opt")
 
@@ -591,18 +597,21 @@ with pd.ExcelWriter(buf, engine="openpyxl") as xw:
             "HFO_t","LFO_t","MDO_t","BIO_t",
             "WtW_HFO","WtW_LFO","WtW_MDO","WtW_BIO",
             "LCV_HFO","LCV_LFO","LCV_MDO","LCV_BIO",
+            "Tier 1 Cost (USD/tCO2e)","Tier 2 Cost (USD/tCO2e)","Benefit Rate (USD/tCO2e)",
             "Premium (Bio − Selected Fuel)","Selected fuel to reduce"
         ],
         "Value": [
             HFO_t,LFO_t,MDO_t,BIO_t,
             WtW_HFO,WtW_LFO,WtW_MDO,WtW_BIO,
             LCV_HFO,LCV_LFO,LCV_MDO,LCV_BIO,
+            TIER1_COST, TIER2_COST, BENEFIT_RATE,
             PREMIUM, reduce_choice
         ],
         "Units": [
             "t","t","t","t",
             "g/MJ","g/MJ","g/MJ","g/MJ",
             "MJ/t","MJ/t","MJ/t","MJ/t",
+            "USD/tCO2e","USD/tCO2e","USD/tCO2e",
             "USD/t","—"
         ],
     }).to_excel(xw, sheet_name="Inputs", index=False)
