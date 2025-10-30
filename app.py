@@ -48,7 +48,7 @@ YEARS = list(range(2028, 2036))
 
 # Cost rates (USD per tCO2eq) — will be overridden by sidebar inputs
 TIER1_COST = 100.0
-TIER2_COST = 380.0
+TIER2_COST = 450.0
 BENEFIT_RATE = 190.0  # negative mass → negative $ (credit)
 
 # Defaults persistence file
