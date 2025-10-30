@@ -313,7 +313,7 @@ def _get_auth_config():
         "trial_cookie":   auth.get("trial_cookie_name", "gfi_trial_id"),
         "session_cookie": auth.get("session_cookie_name", "gfi_session"),
         "expiry_days":    int(auth.get("cookie_expiry_days", 14)),
-        "username":       auth.get("username", "temp_user"),
+        "username":       auth.get("username", "temp"),
         "password":       auth.get("password", "1234"),
     }
 
