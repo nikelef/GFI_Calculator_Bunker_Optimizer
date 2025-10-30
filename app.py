@@ -324,7 +324,7 @@ with st.expander("Methodology & Units", expanded=False):
   - If \(GFI < Direct_y\): \((GFI−Direct_y)\cdot TotalMJ / 10^6\) (negative surplus)
 - **Tier costs default values** \[USD per tCO2eq]: Tier-1 = 100, Tier-2 = 380, Benefit = 190 (when below direct limit)
 - **Optimization (per year)**: reduce **selected fuel (HFO/LFO/MDO-MGO)** by Δt and
-  increase **BIO** by Δt·LCV_sel/LCV_BIO (energy-neutral). Objective:
+  increase **BIO** (or any other selected suitable fuel) by Δt·LCV_sel/LCV_BIO (energy-neutral). Objective:
   minimize (Tier1 + Tier2 + Benefit + Premium)
 
 **Units**: Mass in tons; LCV in MJ/ton; WtW in gCO₂e/MJ.
