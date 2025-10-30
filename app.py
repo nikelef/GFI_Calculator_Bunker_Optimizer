@@ -626,6 +626,9 @@ bar_chart("Total Cost [USD]", "Total_Cost_USD")
 bar_chart("Total Cost (Optimized) [USD]", "Total_Cost_USD_Opt")
 bar_chart("Benefit [USD] (negative = credit)", "GFI_Benefit_USD")
 
+
+def show_trial_footer(owner_name: str, version: str, date_str: str) -> None:
+    st.caption(f"© {date_str.split('-')[0]} {owner_name}. All rights reserved. v{version} ({date_str})")
 # ──────────────────────────────────────────────────────────────────────────────
 # Download Excel
 # ──────────────────────────────────────────────────────────────────────────────
