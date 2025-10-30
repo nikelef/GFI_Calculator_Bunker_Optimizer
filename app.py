@@ -26,6 +26,11 @@ import extra_streamlit_components as stx
 # ↑↑↑
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Page config FIRST (prevents rerun quirks around components)
+# ──────────────────────────────────────────────────────────────────────────────
+st.set_page_config(page_title="IMO GFI Calculator - Bunkering Optimizer", layout="wide")
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Constants (defaults)
 # ──────────────────────────────────────────────────────────────────────────────
 GFI2008 = 93.3  # gCO2eq/MJ (baseline intensity)
@@ -321,8 +326,8 @@ def shared_creds_cookie_gate():
     """
     • Everyone uses the same username/password (from secrets or defaults).
     • First successful login on a browser sets TRIAL cookie (expires in N days) – not deleted on logout.
-    • Each login also sets a SESSION cookie (no explicit expires → ends on logout/close).
-    • Logout deletes only SESSION cookie. Trial countdown is preserved.
+    • Each login also sets a SESSION cookie (no explicit expires → session). Logout deletes only SESSION.
+    • If TRIAL is expired/absent → you must sign in again; a new TRIAL is started only if absent.
     """
     cfg = _get_auth_config()
     trial_ck = cfg["trial_cookie"]
@@ -384,10 +389,9 @@ def shared_creds_cookie_gate():
         st.stop()
 
 # ──────────────────────────────────────────────────────────────────────────────
-# UI — Streamlit
+# Gate
 # ──────────────────────────────────────────────────────────────────────────────
-st.set_page_config(page_title="IMO GFI Calculator - Bunkering Optimizer", layout="wide")
-shared_creds_cookie_gate()  # ← login gate
+shared_creds_cookie_gate()
 st.title("IMO GFI Calculator - Bunkering Optimizer")
 
 # Make the sidebar (input column) a bit wider
