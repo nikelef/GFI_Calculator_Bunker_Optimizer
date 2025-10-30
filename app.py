@@ -18,7 +18,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 import streamlit as st
-import streamlit_authenticator as stauth  # ← added
+import streamlit_authenticator as stauth  # login
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Constants (defaults)
@@ -304,14 +304,14 @@ def shared_creds_cookie_gate():
     """
     Single shared username/password. Per-browser 14-day window from first login,
     enforced by an auth cookie. No user identifier collected.
-    Configure (optional) in Secrets:
+
+    Configure (optionally) in Secrets:
         [auth]
         cookie_name = "gfi_trial_cookie"
         cookie_key  = "CHANGE_ME_TO_LONG_RANDOM_SECRET"
         cookie_expiry_days = 14
         username = "temp_user"
         password = "1234"
-    Defaults are provided if secrets are missing.
     """
     auth = st.secrets.get("auth", {})
     cookie_name = auth.get("cookie_name", "gfi_trial_cookie")
@@ -320,7 +320,15 @@ def shared_creds_cookie_gate():
     uname = auth.get("username", "temp_user")
     pword = auth.get("password", "1234")
 
-    hashed_pw = stauth.Hasher([pword]).generate()[0]
+    # Hash password (support both old/new streamlit-authenticator APIs)
+    try:
+        hashed_pw = stauth.Hasher([pword]).generate()[0]            # constructor + generate()
+    except TypeError:
+        hashed_pw = stauth.Hasher.generate([pword])[0]              # classmethod generate()
+    except Exception:
+        st.error("Authentication hashing failed. Ensure 'streamlit-authenticator' is installed and up to date.")
+        st.stop()
+
     credentials = {
         "usernames": {
             uname: {
@@ -356,7 +364,7 @@ def shared_creds_cookie_gate():
 # UI — Streamlit
 # ──────────────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="IMO GFI Calculator - Bunkering Optimizer", layout="wide")
-shared_creds_cookie_gate()  # ← added
+shared_creds_cookie_gate()  # login gate
 st.title("IMO GFI Calculator - Bunkering Optimizer")
 
 # Make the sidebar (input column) a bit wider
