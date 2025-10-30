@@ -6,7 +6,7 @@
 #   LCV : MJ/ton
 #   WtW : gCO2eq/MJ
 
-from __future__ import annotations 
+from __future__ import annotations
 
 import io
 import json
@@ -313,7 +313,7 @@ def _get_auth_config():
         "trial_cookie":   auth.get("trial_cookie_name", "gfi_trial_id"),
         "session_cookie": auth.get("session_cookie_name", "gfi_session"),
         "expiry_days":    int(auth.get("cookie_expiry_days", 14)),
-        "username":       auth.get("username", "temp"),
+        "username":       auth.get("username", "temp_user"),
         "password":       auth.get("password", "1234"),
     }
 
