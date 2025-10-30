@@ -314,7 +314,7 @@ def _get_auth_config():
         "cookie_name": auth.get("cookie_name", "gfi_trial_cookie"),
         "cookie_key":  auth.get("cookie_key",  "PLEASE_CHANGE_ME"),  # only used for cookie value salt
         "expiry_days": int(auth.get("cookie_expiry_days", 14)),
-        "username":    auth.get("username", "temp_user"),
+        "username":    auth.get("username", "user"),
         "password":    auth.get("password", "1234"),
     }
 
