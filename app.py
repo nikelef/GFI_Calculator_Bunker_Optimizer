@@ -663,4 +663,6 @@ st.download_button(
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
 
-st.caption("© 2025 — Single-vessel GFI optimizer. Initial costs shown; optimization reports deltas and Total_Cost_USD_Opt.")
+#st.caption("© 2025 — Single-vessel GFI optimizer. Initial costs shown; optimization reports deltas and Total_Cost_USD_Opt.")
+st.info("Public trial — non-production. Results are informational; no warranty.", icon="ℹ️")
+show_trial_footer("Nikitas Eleftheriou", "1.0", "2025-10-30")
