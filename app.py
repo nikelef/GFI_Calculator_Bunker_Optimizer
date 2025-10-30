@@ -443,7 +443,7 @@ fig.add_trace(go.Scatter(
 ))
 
 fig.update_layout(
-    height=260,
+    height=380,
     margin=dict(l=6, r=6, t=26, b=4),
     yaxis_title="gCO₂e/MJ",
     xaxis_title="Year",
