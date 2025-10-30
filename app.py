@@ -19,11 +19,11 @@ import plotly.graph_objects as go
 import plotly.express as px
 import streamlit as st
 
-# ↓↓↓ added for simple cookie-based shared login (per-browser 14-day window)
-from datetime import datetime, timedelta, timezone
+# ↓↓↓ simple cookie-based shared login (trial vs session cookies)
+from datetime import datetime, timedelta
 import uuid
 import extra_streamlit_components as stx
-# ↑↑↑ added
+# ↑↑↑
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Constants (defaults)
@@ -303,84 +303,58 @@ def us_number_input(label: str, default: float, key: str, *, container, min_valu
         return max(float(st.session_state.get(f"__prev_{key}", default)), min_value)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Login gate (shared username/password; per-browser 14-day cookie + session fallback)
+# Login gate (shared username/password; 14-day trial cookie + separate session cookie)
 # ──────────────────────────────────────────────────────────────────────────────
-_cookie_manager = stx.CookieManager(key="trial_cookie_manager")
+_cookie_mgr = stx.CookieManager(key="cookie_mgr")
 
 def _get_auth_config():
     auth = st.secrets.get("auth", {})
     return {
-        "cookie_name": auth.get("cookie_name", "gfi_trial_cookie"),
-        "cookie_key":  auth.get("cookie_key",  "PLEASE_CHANGE_ME"),  # simple salt
-        "expiry_days": int(auth.get("cookie_expiry_days", 14)),
-        "username":    auth.get("username", "temp_user"),
-        "password":    auth.get("password", "1234"),
+        "trial_cookie":   auth.get("trial_cookie_name", "gfi_trial_id"),
+        "session_cookie": auth.get("session_cookie_name", "gfi_session"),
+        "expiry_days":    int(auth.get("cookie_expiry_days", 14)),
+        "username":       auth.get("username", "temp_user"),
+        "password":       auth.get("password", "1234"),
     }
-
-def _session_token_valid() -> bool:
-    tok = st.session_state.get("_trial_token")
-    exp = st.session_state.get("_trial_expires")
-    if not tok or not exp:
-        return False
-    try:
-        exp_dt = datetime.fromisoformat(exp)
-        if exp_dt.tzinfo is None:
-            exp_dt = exp_dt.replace(tzinfo=timezone.utc)
-    except Exception:
-        return False
-    return datetime.now(timezone.utc) < exp_dt
-
-def _set_session_token(expiry_days: int):
-    expires_at = datetime.now(timezone.utc) + timedelta(days=expiry_days)
-    st.session_state["_trial_token"] = f"{uuid.uuid4()}"
-    st.session_state["_trial_expires"] = expires_at.isoformat()
 
 def shared_creds_cookie_gate():
     """
-    Users enter only shared username/password.
-    On first success, set a browser cookie (and a session fallback) that expires in N days (default 14).
-    Different browsers/devices get independent windows.
+    • Everyone uses the same username/password (from secrets or defaults).
+    • First successful login on a browser sets TRIAL cookie (expires in N days) – not deleted on logout.
+    • Each login also sets a SESSION cookie (no explicit expires → ends on logout/close).
+    • Logout deletes only SESSION cookie. Trial countdown is preserved.
     """
     cfg = _get_auth_config()
-    cookie_name = cfg["cookie_name"]
+    trial_ck = cfg["trial_cookie"]
+    sess_ck  = cfg["session_cookie"]
     expiry_days = cfg["expiry_days"]
 
-    # 1) If a valid session fallback token exists, allow access (covers environments where cookies fail)
-    if _session_token_valid():
+    # Read cookies
+    trial_tok = _cookie_mgr.get(trial_ck)
+    sess_tok  = _cookie_mgr.get(sess_ck)
+
+    # If session is active and trial exists → allow app + show Logout
+    if sess_tok and trial_tok:
         with st.sidebar:
             if st.button("Logout"):
                 try:
-                    _cookie_manager.delete(cookie_name)
+                    _cookie_mgr.delete(sess_ck)  # DO NOT delete trial cookie
                 except Exception:
                     pass
-                st.session_state.pop("_trial_token", None)
-                st.session_state.pop("_trial_expires", None)
                 st.rerun()
-            st.caption(f"Trial access (session). Expires within ≤ {expiry_days} days.")
         return
 
-    # 2) Try cookie
-    try:
-        token = _cookie_manager.get(cfg["cookie_name"])
-    except Exception:
-        token = None
+    # If session cookie exists but trial is gone (expired), clear session and force login
+    if sess_tok and not trial_tok:
+        try:
+            _cookie_mgr.delete(sess_ck)
+        except Exception:
+            pass
+        st.rerun()
 
-    if token:
-        with st.sidebar:
-            if st.button("Logout"):
-                try:
-                    _cookie_manager.delete(cookie_name)
-                except Exception:
-                    pass
-                st.session_state.pop("_trial_token", None)
-                st.session_state.pop("_trial_expires", None)
-                st.rerun()
-            st.caption(f"Trial access (cookie). Expires automatically within ≤ {expiry_days} days.")
-        return
-
-    # 3) No cookie/session → show login form
+    # Show login form
     st.title("Sign in")
-    st.write("Enter temporary credentials to access the app.")
+    st.write("Enter the temporary credentials to access the app.")
     u = st.text_input("Username")
     p = st.text_input("Password", type="password")
     submit = st.button("Sign in", type="primary")
@@ -388,22 +362,22 @@ def shared_creds_cookie_gate():
     if not submit:
         st.stop()
 
-    # 4) Validate shared credentials
+    # Validate
     if (u == cfg["username"]) and (p == cfg["password"]):
-        # Attempt to set cookie (naive UTC → naive required by component)
-        expires_at = datetime.utcnow() + timedelta(days=expiry_days)
-        value = f"{uuid.uuid4()}::{cfg['cookie_key']}"
-        cookie_set_ok = False
+        # 1) Ensure TRIAL cookie exists (create only if missing, so countdown is preserved)
+        if not trial_tok:
+            expires_at = datetime.utcnow() + timedelta(days=expiry_days)
+            try:
+                _cookie_mgr.set(trial_ck, str(uuid.uuid4()), expires_at=expires_at, key=f"trial-{uuid.uuid4()}")
+            except Exception:
+                pass  # if cookies blocked, trial won't persist; user can still use current session
+
+        # 2) Set/refresh SESSION cookie (session cookie → no expires)
         try:
-            _cookie_manager.set(cookie_name, value, expires_at=expires_at, key=str(uuid.uuid4()))
-            cookie_set_ok = True
+            _cookie_mgr.set(sess_ck, str(uuid.uuid4()), key=f"sess-{uuid.uuid4()}")
         except Exception:
-            cookie_set_ok = False
+            pass
 
-        # Always set session fallback so auth persists even if cookies blocked
-        _set_session_token(expiry_days)
-
-        # Force a rerun so the authenticated branch renders immediately
         st.rerun()
     else:
         st.error("Invalid credentials.")
@@ -557,7 +531,7 @@ fig.add_trace(go.Scatter(
 ))
 
 fig.update_layout(
-    height=380,  # increased for better vertical separation
+    height=380,  # taller for clearer separation
     margin=dict(l=6, r=6, t=26, b=4),
     yaxis_title="gCO₂e/MJ",
     xaxis_title="Year",
