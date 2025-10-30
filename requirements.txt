@@ -6,3 +6,4 @@ openpyxl>=3.1
 gspread
 google-auth
 streamlit-authenticator
+extra-streamlit-components
