@@ -18,7 +18,12 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 import streamlit as st
-import streamlit_authenticator as stauth  # login
+
+# ↓↓↓ added for simple cookie-based shared login (per-browser 14-day window)
+from datetime import datetime, timedelta, timezone
+import uuid
+import extra_streamlit_components as stx
+# ↑↑↑ added
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Constants (defaults)
@@ -300,71 +305,82 @@ def us_number_input(label: str, default: float, key: str, *, container, min_valu
 # ──────────────────────────────────────────────────────────────────────────────
 # Login gate (shared username/password; per-browser 14-day cookie)
 # ──────────────────────────────────────────────────────────────────────────────
-def shared_creds_cookie_gate():
-    """
-    Single shared username/password. Per-browser 14-day window from first login,
-    enforced by an auth cookie. No user identifier collected.
+_cookie_manager = stx.CookieManager()
 
-    Configure (optionally) in Secrets:
-        [auth]
-        cookie_name = "gfi_trial_cookie"
-        cookie_key  = "CHANGE_ME_TO_LONG_RANDOM_SECRET"
-        cookie_expiry_days = 14
-        username = "temp_user"
-        password = "1234"
-    """
+def _get_auth_config():
+    # Optional in Secrets; defaults if absent
     auth = st.secrets.get("auth", {})
-    cookie_name = auth.get("cookie_name", "gfi_trial_cookie")
-    cookie_key  = auth.get("cookie_key",  "PLEASE_CHANGE_ME")
-    expiry_days = int(auth.get("cookie_expiry_days", 14))
-    uname = auth.get("username", "temp_user")
-    pword = auth.get("password", "1234")
-
-    # Hash password (support both old/new streamlit-authenticator APIs)
-    try:
-        hashed_pw = stauth.Hasher([pword]).generate()[0]            # constructor + generate()
-    except TypeError:
-        hashed_pw = stauth.Hasher.generate([pword])[0]              # classmethod generate()
-    except Exception:
-        st.error("Authentication hashing failed. Ensure 'streamlit-authenticator' is installed and up to date.")
-        st.stop()
-
-    credentials = {
-        "usernames": {
-            uname: {
-                "name": "Temporary User",
-                "password": hashed_pw
-            }
-        }
+    return {
+        "cookie_name": auth.get("cookie_name", "gfi_trial_cookie"),
+        "cookie_key":  auth.get("cookie_key",  "PLEASE_CHANGE_ME"),  # only used for cookie value salt
+        "expiry_days": int(auth.get("cookie_expiry_days", 14)),
+        "username":    auth.get("username", "temp_user"),
+        "password":    auth.get("password", "1234"),
     }
 
-    authenticator = stauth.Authenticate(
-        credentials,
-        cookie_name,
-        cookie_key,
-        cookie_expiry_days=expiry_days,
-    )
+def shared_creds_cookie_gate():
+    """
+    Simple gate:
+      • Users enter shared username/password only.
+      • On first success, set a browser cookie that expires in N days (default 14).
+      • Different browsers/devices get independent windows.
+    """
+    cfg = _get_auth_config()
+    cookie_name = cfg["cookie_name"]
+    expiry_days = cfg["expiry_days"]
 
-    name, authentication_status, username = authenticator.login("Sign in", "main")
+    # Try to read existing cookie (if present and not expired, browser keeps it)
+    try:
+        token = _cookie_manager.get(cookie_name)
+    except Exception:
+        token = None
 
-    if authentication_status:
+    if token:
+        # Already authenticated on this browser
         with st.sidebar:
-            authenticator.logout("Logout", "sidebar")
-            st.caption(
-                "Trial access via cookie. "
-                f"Cookie expires in ≤ {expiry_days} days from first successful login (per browser/device)."
-            )
+            if st.button("Logout"):
+                try:
+                    _cookie_manager.delete(cookie_name)
+                except Exception:
+                    pass
+                # Fallback clear
+                st.session_state.pop("_trial_token", None)
+                st.rerun()
+            st.caption(f"Trial access (cookie). Expires automatically within ≤ {expiry_days} days.")
         return
 
-    if authentication_status is False:
+    # No cookie → show login form
+    st.title("Sign in")
+    st.write("Enter temporary credentials to access the app.")
+    u = st.text_input("Username")
+    p = st.text_input("Password", type="password")
+    submit = st.button("Sign in")
+
+    if not submit:
+        st.stop()
+
+    # Validate shared credentials (constant-time-ish compare via equality on short strings suffices here)
+    if (u == cfg["username"]) and (p == cfg["password"]):
+        # Set cookie with browser-managed expiry
+        expires_at = datetime.now(timezone.utc) + timedelta(days=expiry_days)
+        value = f"{uuid.uuid4()}::{cfg['cookie_key']}"
+        try:
+            # key arg must be unique when updating in one run; uuid is fine
+            _cookie_manager.set(cookie_name, value, expires_at=expires_at, key=str(uuid.uuid4()))
+        except Exception:
+            # Fallback to session_state if cookies unavailable
+            st.session_state["_trial_token"] = value
+            st.session_state["_trial_expires"] = expires_at.isoformat()
+        st.rerun()
+    else:
         st.error("Invalid credentials.")
-    st.stop()
+        st.stop()
 
 # ──────────────────────────────────────────────────────────────────────────────
 # UI — Streamlit
 # ──────────────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="IMO GFI Calculator - Bunkering Optimizer", layout="wide")
-shared_creds_cookie_gate()  # login gate
+shared_creds_cookie_gate()  # ← login gate
 st.title("IMO GFI Calculator - Bunkering Optimizer")
 
 # Make the sidebar (input column) a bit wider
