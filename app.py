@@ -370,7 +370,7 @@ def shared_creds_cookie_gate():
 # Gate
 # ──────────────────────────────────────────────────────────────────────────────
 shared_creds_cookie_gate()
-st.title("IMO GFI Calculator - Bunkering Optimizer")
+st.title("IMO GFI Calculator - Bunkers Optimizer")
 
 # Make the sidebar (input column) a bit wider
 st.markdown(
