@@ -303,74 +303,107 @@ def us_number_input(label: str, default: float, key: str, *, container, min_valu
         return max(float(st.session_state.get(f"__prev_{key}", default)), min_value)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Login gate (shared username/password; per-browser 14-day cookie)
+# Login gate (shared username/password; per-browser 14-day cookie + session fallback)
 # ──────────────────────────────────────────────────────────────────────────────
-_cookie_manager = stx.CookieManager()
+_cookie_manager = stx.CookieManager(key="trial_cookie_manager")
 
 def _get_auth_config():
-    # Optional in Secrets; defaults if absent
     auth = st.secrets.get("auth", {})
     return {
         "cookie_name": auth.get("cookie_name", "gfi_trial_cookie"),
-        "cookie_key":  auth.get("cookie_key",  "PLEASE_CHANGE_ME"),  # only used for cookie value salt
+        "cookie_key":  auth.get("cookie_key",  "PLEASE_CHANGE_ME"),  # simple salt
         "expiry_days": int(auth.get("cookie_expiry_days", 14)),
-        "username":    auth.get("username", "user"),
+        "username":    auth.get("username", "temp_user"),
         "password":    auth.get("password", "1234"),
     }
 
+def _session_token_valid() -> bool:
+    tok = st.session_state.get("_trial_token")
+    exp = st.session_state.get("_trial_expires")
+    if not tok or not exp:
+        return False
+    try:
+        exp_dt = datetime.fromisoformat(exp)
+        if exp_dt.tzinfo is None:
+            exp_dt = exp_dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        return False
+    return datetime.now(timezone.utc) < exp_dt
+
+def _set_session_token(expiry_days: int):
+    expires_at = datetime.now(timezone.utc) + timedelta(days=expiry_days)
+    st.session_state["_trial_token"] = f"{uuid.uuid4()}"
+    st.session_state["_trial_expires"] = expires_at.isoformat()
+
 def shared_creds_cookie_gate():
     """
-    Simple gate:
-      • Users enter shared username/password only.
-      • On first success, set a browser cookie that expires in N days (default 14).
-      • Different browsers/devices get independent windows.
+    Users enter only shared username/password.
+    On first success, set a browser cookie (and a session fallback) that expires in N days (default 14).
+    Different browsers/devices get independent windows.
     """
     cfg = _get_auth_config()
     cookie_name = cfg["cookie_name"]
     expiry_days = cfg["expiry_days"]
 
-    # Try to read existing cookie (if present and not expired, browser keeps it)
-    try:
-        token = _cookie_manager.get(cookie_name)
-    except Exception:
-        token = None
-
-    if token:
-        # Already authenticated on this browser
+    # 1) If a valid session fallback token exists, allow access (covers environments where cookies fail)
+    if _session_token_valid():
         with st.sidebar:
             if st.button("Logout"):
                 try:
                     _cookie_manager.delete(cookie_name)
                 except Exception:
                     pass
-                # Fallback clear
                 st.session_state.pop("_trial_token", None)
+                st.session_state.pop("_trial_expires", None)
+                st.rerun()
+            st.caption(f"Trial access (session). Expires within ≤ {expiry_days} days.")
+        return
+
+    # 2) Try cookie
+    try:
+        token = _cookie_manager.get(cfg["cookie_name"])
+    except Exception:
+        token = None
+
+    if token:
+        with st.sidebar:
+            if st.button("Logout"):
+                try:
+                    _cookie_manager.delete(cookie_name)
+                except Exception:
+                    pass
+                st.session_state.pop("_trial_token", None)
+                st.session_state.pop("_trial_expires", None)
                 st.rerun()
             st.caption(f"Trial access (cookie). Expires automatically within ≤ {expiry_days} days.")
         return
 
-    # No cookie → show login form
+    # 3) No cookie/session → show login form
     st.title("Sign in")
     st.write("Enter temporary credentials to access the app.")
     u = st.text_input("Username")
     p = st.text_input("Password", type="password")
-    submit = st.button("Sign in")
+    submit = st.button("Sign in", type="primary")
 
     if not submit:
         st.stop()
 
-    # Validate shared credentials (constant-time-ish compare via equality on short strings suffices here)
+    # 4) Validate shared credentials
     if (u == cfg["username"]) and (p == cfg["password"]):
-        # Set cookie with browser-managed expiry
-        expires_at = datetime.now(timezone.utc) + timedelta(days=expiry_days)
+        # Attempt to set cookie (naive UTC → naive required by component)
+        expires_at = datetime.utcnow() + timedelta(days=expiry_days)
         value = f"{uuid.uuid4()}::{cfg['cookie_key']}"
+        cookie_set_ok = False
         try:
-            # key arg must be unique when updating in one run; uuid is fine
             _cookie_manager.set(cookie_name, value, expires_at=expires_at, key=str(uuid.uuid4()))
+            cookie_set_ok = True
         except Exception:
-            # Fallback to session_state if cookies unavailable
-            st.session_state["_trial_token"] = value
-            st.session_state["_trial_expires"] = expires_at.isoformat()
+            cookie_set_ok = False
+
+        # Always set session fallback so auth persists even if cookies blocked
+        _set_session_token(expiry_days)
+
+        # Force a rerun so the authenticated branch renders immediately
         st.rerun()
     else:
         st.error("Invalid credentials.")
