@@ -6,7 +6,7 @@
 #   LCV : MJ/ton
 #   WtW : gCO2eq/MJ
 
-from __future__ import annotations
+from __future__ import annotations 
 
 import io
 import json
