@@ -382,22 +382,51 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# Drop-in replacement for your IMO GFI app's "Methodology & Units" expander
 with st.expander("Methodology & Units", expanded=False):
-    st.markdown(
-        r"""
-**Formulas:**
+    st.markdown("**Formulas**")
 
-- **GFI** \[gCO₂e/MJ] = {sum_i m_i * LCV_i * WtW_i}/ {sum_i m_i * LCV_i)
-- **Deficit/Surplus** \[tCO₂e] for year *y*:
-  - If \(GFI > Base_y\): \((GFI−Direct_y)\cdot TotalMJ / 10^6\)
-  - If \(Direct_y \le GFI \le Base_y\): \((GFI−Direct_y)\cdot TotalMJ / 10^6\)
-  - If \(GFI < Direct_y\): \((GFI−Direct_y)\cdot TotalMJ / 10^6\) (negative surplus)
-- **Tier costs default values** \[USD per tCO2eq]: Tier-1 = 100, Tier-2 = 380, Benefit = 190 (when below direct limit)
-- **Optimization (per year)**: reduce **selected fuel (HFO/LFO/MDO-MGO)** by Δt and
-  increase **BIO** by Δt·LCV_sel/LCV_BIO (energy-neutral). Objective:
-  minimize (Tier1 + Tier2 + Benefit(negative) + Premium)
-"""
+    # GFI
+    st.markdown("**GFI** [gCO₂e/MJ]:")
+    st.latex(
+        r"\mathrm{GFI}=\frac{\sum_{i} m_i\,\mathrm{LCV}_i\,I_i}{\sum_{i} m_i\,\mathrm{LCV}_i}"
     )
+    st.markdown(
+        r"""where $m_i$ = mass of fuel $i$ [t], $\mathrm{LCV}_i$ = lower heating value [MJ/t],
+$I_i$ = WtW intensity [gCO$_2$e/MJ], and $E_{\text{total}}=\sum_i m_i\,\mathrm{LCV}_i$ [MJ]."""
+    )
+
+    # Deficit / Surplus
+    st.markdown("**Deficit / Surplus** [tCO₂e] for year \(y\):")
+    st.latex(
+        r"\Delta(y)=\frac{\big(\mathrm{GFI}(y)-L(y)\big)\,E_{\text{total}}(y)}{10^{6}}"
+    )
+    st.latex(
+        r"L(y)=\begin{cases}"
+        r"\mathrm{Base}_y,& \mathrm{GFI}(y)>\mathrm{Base}_y\\[4pt]"
+        r"\mathrm{Direct}_y,& \mathrm{GFI}(y)\le \mathrm{Base}_y"
+        r"\end{cases}"
+    )
+    st.markdown(
+        r"""Here $E_{\text{total}}(y)$ is total energy [MJ] in year \(y\). Positive \(\Delta(y)\) =
+**deficit**; negative \(\Delta(y)\) = **surplus** (credit)."""
+    )
+
+    # Tier costs
+    st.markdown("**Tier costs (defaults)** [USD per tCO₂e]:")
+    st.markdown("- Tier-1 = **100**  \n- Tier-2 = **380**  \n- Benefit (credit when \(\\mathrm{GFI}(y)<\\mathrm{Direct}_y\)) = **190**")
+
+    # Optimization
+    st.markdown("**Optimization (per year)**")
+    st.latex(
+        r"\Delta m_{\text{BIO}}=\Delta t\cdot\frac{\mathrm{LCV}_{\text{sel}}}{\mathrm{LCV}_{\text{BIO}}}"
+    )
+    st.markdown(
+        r"""Reduce the selected fossil (HFO/LFO/MDO-MGO) by \(\Delta t\) [t] (voyage first, then berth),
+and increase BIO **energy-equivalently**. Objective: minimize
+\(\text{Total Cost}=\text{Tier1}+\text{Tier2}-\text{Benefit}+\text{BIO Premium}\)."""
+    )
+
 
 # Load persisted defaults
 states = load_defaults()
