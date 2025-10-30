@@ -28,7 +28,7 @@ import extra_streamlit_components as stx
 # ──────────────────────────────────────────────────────────────────────────────
 # Page config FIRST
 # ──────────────────────────────────────────────────────────────────────────────
-st.set_page_config(page_title="IMO GFI Calculator - Bunkering Optimizer", layout="wide")
+st.set_page_config(page_title="IMO GFI Calculator - Bunkers Optimizer", layout="wide")
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Constants (defaults)
