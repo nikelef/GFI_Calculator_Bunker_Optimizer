@@ -18,6 +18,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 import streamlit as st
+import streamlit_authenticator as stauth  # ← added
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Constants (defaults)
@@ -48,7 +49,7 @@ YEARS = list(range(2028, 2036))
 
 # Cost rates (USD per tCO2eq) — will be overridden by sidebar inputs
 TIER1_COST = 100.0
-TIER2_COST = 450.0
+TIER2_COST = 380.0
 BENEFIT_RATE = 190.0  # negative mass → negative $ (credit)
 
 # Defaults persistence file
@@ -297,10 +298,66 @@ def us_number_input(label: str, default: float, key: str, *, container, min_valu
         return max(float(st.session_state.get(f"__prev_{key}", default)), min_value)
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Login gate (shared username/password; per-browser 14-day cookie)
+# ──────────────────────────────────────────────────────────────────────────────
+def shared_creds_cookie_gate():
+    """
+    Single shared username/password. Per-browser 14-day window from first login,
+    enforced by an auth cookie. No user identifier collected.
+    Configure (optional) in Secrets:
+        [auth]
+        cookie_name = "gfi_trial_cookie"
+        cookie_key  = "CHANGE_ME_TO_LONG_RANDOM_SECRET"
+        cookie_expiry_days = 14
+        username = "temp_user"
+        password = "1234"
+    Defaults are provided if secrets are missing.
+    """
+    auth = st.secrets.get("auth", {})
+    cookie_name = auth.get("cookie_name", "gfi_trial_cookie")
+    cookie_key  = auth.get("cookie_key",  "PLEASE_CHANGE_ME")
+    expiry_days = int(auth.get("cookie_expiry_days", 14))
+    uname = auth.get("username", "temp_user")
+    pword = auth.get("password", "1234")
+
+    hashed_pw = stauth.Hasher([pword]).generate()[0]
+    credentials = {
+        "usernames": {
+            uname: {
+                "name": "Temporary User",
+                "password": hashed_pw
+            }
+        }
+    }
+
+    authenticator = stauth.Authenticate(
+        credentials,
+        cookie_name,
+        cookie_key,
+        cookie_expiry_days=expiry_days,
+    )
+
+    name, authentication_status, username = authenticator.login("Sign in", "main")
+
+    if authentication_status:
+        with st.sidebar:
+            authenticator.logout("Logout", "sidebar")
+            st.caption(
+                "Trial access via cookie. "
+                f"Cookie expires in ≤ {expiry_days} days from first successful login (per browser/device)."
+            )
+        return
+
+    if authentication_status is False:
+        st.error("Invalid credentials.")
+    st.stop()
+
+# ──────────────────────────────────────────────────────────────────────────────
 # UI — Streamlit
 # ──────────────────────────────────────────────────────────────────────────────
-st.set_page_config(page_title="IMO GHG Intensity (GFI) Calculator - Bunkering Optimizer", layout="wide")
-st.title("IMO GHG Intensity (GFI) Calculator - Bunkering Optimizer")
+st.set_page_config(page_title="IMO GFI Calculator - Bunkering Optimizer", layout="wide")
+shared_creds_cookie_gate()  # ← added
+st.title("IMO GFI Calculator - Bunkering Optimizer")
 
 # Make the sidebar (input column) a bit wider
 st.markdown(
@@ -443,7 +500,7 @@ fig.add_trace(go.Scatter(
 ))
 
 fig.update_layout(
-    height=380,
+    height=380,  # increased for better vertical separation
     margin=dict(l=6, r=6, t=26, b=4),
     yaxis_title="gCO₂e/MJ",
     xaxis_title="Year",
