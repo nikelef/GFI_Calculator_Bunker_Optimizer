@@ -19,14 +19,14 @@ import plotly.graph_objects as go
 import plotly.express as px
 import streamlit as st
 
-# ↓↓↓ simple cookie-based shared login (trial vs session cookies)
-from datetime import datetime, timedelta
+# ↓↓↓ hardened shared-credentials login (cookie + session fallback)
+from datetime import datetime, timedelta, timezone
 import uuid
 import extra_streamlit_components as stx
 # ↑↑↑
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Page config FIRST (prevents rerun quirks around components)
+# Page config FIRST
 # ──────────────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="IMO GFI Calculator - Bunkering Optimizer", layout="wide")
 
@@ -36,24 +36,12 @@ st.set_page_config(page_title="IMO GFI Calculator - Bunkering Optimizer", layout
 GFI2008 = 93.3  # gCO2eq/MJ (baseline intensity)
 
 ZT_BASE = {
-    2028: 4.0,
-    2029: 6.0,
-    2030: 8.0,
-    2031: 12.4,
-    2032: 16.8,
-    2033: 21.2,
-    2034: 25.6,
-    2035: 30.0,
+    2028: 4.0, 2029: 6.0, 2030: 8.0, 2031: 12.4,
+    2032: 16.8, 2033: 21.2, 2034: 25.6, 2035: 30.0,
 }
 ZT_DIRECT = {
-    2028: 17.0,
-    2029: 19.0,
-    2030: 21.0,
-    2031: 25.4,
-    2032: 29.8,
-    2033: 34.2,
-    2034: 38.6,
-    2035: 43.0,
+    2028: 17.0, 2029: 19.0, 2030: 21.0, 2031: 25.4,
+    2032: 29.8, 2033: 34.2, 2034: 38.6, 2035: 43.0,
 }
 YEARS = list(range(2028, 2036))
 
@@ -66,12 +54,7 @@ BENEFIT_RATE = 190.0  # negative mass → negative $ (credit)
 DEFAULTS_PATH = ".gfi_bunkering_defaults.json"
 
 # Labels (for UI)
-CF_LABELS = {
-    "HFO": "HFO",
-    "LFO": "LFO",
-    "MDO": "MDO/MGO",
-    "BIO": "BIO",
-}
+CF_LABELS = {"HFO": "HFO", "LFO": "LFO", "MDO": "MDO/MGO", "BIO": "BIO"}
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Data & defaults
@@ -79,23 +62,11 @@ CF_LABELS = {
 @dataclass
 class FuelInputs:
     # Masses [t]
-    HFO_t: float
-    LFO_t: float
-    MDO_t: float
-    BIO_t: float
-
+    HFO_t: float; LFO_t: float; MDO_t: float; BIO_t: float
     # WtW [gCO2eq/MJ]
-    WtW_HFO: float
-    WtW_LFO: float
-    WtW_MDO: float
-    WtW_BIO: float
-
+    WtW_HFO: float; WtW_LFO: float; WtW_MDO: float; WtW_BIO: float
     # LCV [MJ/t]
-    LCV_HFO: float
-    LCV_LFO: float
-    LCV_MDO: float
-    LCV_BIO: float
-
+    LCV_HFO: float; LCV_LFO: float; LCV_MDO: float; LCV_BIO: float
     # Premium USD/t (Bio − Selected Fuel)
     PREMIUM: float
 
@@ -137,108 +108,69 @@ def save_defaults(dct: Dict) -> None:
 
 
 # Targets
-GFI_BASE = {yr: (1 - ZT_BASE[yr] / 100.0) * GFI2008 for yr in YEARS}
+GFI_BASE   = {yr: (1 - ZT_BASE[yr]   / 100.0) * GFI2008 for yr in YEARS}
 GFI_DIRECT = {yr: (1 - ZT_DIRECT[yr] / 100.0) * GFI2008 for yr in YEARS}
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Core calculations (defined BEFORE any usage)
+# Core calculations
 # ──────────────────────────────────────────────────────────────────────────────
 def deficit_surplus_tCO2eq(gfi_g_per_MJ: float, total_MJ: float, year: int) -> float:
-    """GFI_Deficit_Surplus_year in tCO2eq. Positive = deficit, Negative = surplus."""
     if total_MJ <= 0:
         return 0.0
-
-    base = GFI_BASE[year]
     direct = GFI_DIRECT[year]
-
-    if gfi_g_per_MJ > base:
-        g_g = (gfi_g_per_MJ - direct) * total_MJ
-    elif gfi_g_per_MJ >= direct:
-        g_g = (gfi_g_per_MJ - direct) * total_MJ
-    else:
-        g_g = (gfi_g_per_MJ - direct) * total_MJ  # negative surplus
-
+    g_g = (gfi_g_per_MJ - direct) * total_MJ  # same expression across zones (sign handles surplus)
     return g_g / 1e6  # grams → tonnes
 
 
 def tier_costs_usd(gfi_g_per_MJ: float, total_MJ: float, year: int) -> Tuple[float, float, float]:
-    """Return (Tier1 USD, Tier2 USD, Benefit USD). Benefit negative below Direct."""
     if total_MJ <= 0:
         return 0.0, 0.0, 0.0
-
-    base = GFI_BASE[year]
-    direct = GFI_DIRECT[year]
-
+    base = GFI_BASE[year]; direct = GFI_DIRECT[year]
     if gfi_g_per_MJ > base:
         tier1_mt = (base - direct) * total_MJ / 1e6
         tier2_mt = (gfi_g_per_MJ - base) * total_MJ / 1e6
         benefit_mt = 0.0
     elif gfi_g_per_MJ >= direct:
         tier1_mt = (gfi_g_per_MJ - direct) * total_MJ / 1e6
-        tier2_mt = 0.0
-        benefit_mt = 0.0
+        tier2_mt = 0.0; benefit_mt = 0.0
     else:
-        tier1_mt = 0.0
-        tier2_mt = 0.0
-        benefit_mt = (gfi_g_per_MJ - direct) * total_MJ / 1e6  # negative
-
-    t1_usd = tier1_mt * TIER1_COST
-    t2_usd = tier2_mt * TIER2_COST
-    ben_usd = benefit_mt * BENEFIT_RATE
-    return t1_usd, t2_usd, ben_usd
+        tier1_mt = 0.0; tier2_mt = 0.0
+        benefit_mt = (gfi_g_per_MJ - direct) * total_MJ / 1e6
+    return tier1_mt * TIER1_COST, tier2_mt * TIER2_COST, benefit_mt * BENEFIT_RATE
 
 
 def optimize_energy_neutral(
-    fi: FuelInputs,
-    year: int,
-    reduce_fuel: str = "HFO",  # "HFO" | "LFO" | "MDO/MGO"
-    coarse_steps: int = 200,    # accepted for compatibility (unused)
-    fine_window: float = 0.02,  # accepted for compatibility (unused)
-    fine_step: float = 0.001,   # accepted for compatibility (unused)
+    fi: FuelInputs, year: int, reduce_fuel: str = "HFO",
+    coarse_steps: int = 200, fine_window: float = 0.02, fine_step: float = 0.001
 ) -> Tuple[float, float, float, float, float]:
-    """
-    Closed-form optimizer: TotalCost(f) is piecewise-linear in f with kinks only at
-    GFI == Direct_y and GFI == Base_y. Therefore the global minimum lies in
-    {0, f_direct, f_base, 1}. Returns:
-    (selected_fuel_reduction_t, bio_increase_t, gfi_new, reg_cost_usd, premium_cost_usd)
-    """
-    # Map selected fuel
     if reduce_fuel == "HFO":
         sel_mass0, sel_lcv, sel_wtw = fi.HFO_t, fi.LCV_HFO, fi.WtW_HFO
     elif reduce_fuel == "LFO":
         sel_mass0, sel_lcv, sel_wtw = fi.LFO_t, fi.LCV_LFO, fi.WtW_LFO
-    else:  # "MDO/MGO"
+    else:
         sel_mass0, sel_lcv, sel_wtw = fi.MDO_t, fi.LCV_MDO, fi.WtW_MDO
 
     D0 = fi.total_MJ()
     if sel_mass0 <= 0 or fi.LCV_BIO <= 0 or D0 <= 0:
         return 0.0, 0.0, fi.gfi(), 0.0, 0.0
 
-    # GFI(f) = G0 + s*f
     G0 = fi.gfi()
     s = (sel_mass0 * sel_lcv / D0) * (fi.WtW_BIO - sel_wtw)
 
     def eval_total(f: float) -> Tuple[float, float, float, float, float]:
-        # New masses after reducing selected fuel by fraction f and increasing BIO for energy neutrality
         sel_new = sel_mass0 * (1.0 - f)
         d_sel = sel_mass0 - sel_new
         bio_new = fi.BIO_t + (d_sel * sel_lcv) / fi.LCV_BIO
 
         hfo_new, lfo_new, mdo_new = fi.HFO_t, fi.LFO_t, fi.MDO_t
-        if reduce_fuel == "HFO":
-            hfo_new = sel_new
-        elif reduce_fuel == "LFO":
-            lfo_new = sel_new
-        else:
-            mdo_new = sel_new
+        if reduce_fuel == "HFO": hfo_new = sel_new
+        elif reduce_fuel == "LFO": lfo_new = sel_new
+        else: mdo_new = sel_new
 
         total_MJ = (
-            hfo_new * fi.LCV_HFO
-            + lfo_new * fi.LCV_LFO
-            + mdo_new * fi.LCV_MDO
-            + bio_new * fi.LCV_BIO
+            hfo_new * fi.LCV_HFO + lfo_new * fi.LCV_LFO +
+            mdo_new * fi.LCV_MDO + bio_new * fi.LCV_BIO
         )
-
         if total_MJ <= 0:
             return np.inf, 0.0, 0.0, 0.0, 0.0
 
@@ -249,22 +181,18 @@ def optimize_energy_neutral(
             + bio_new * fi.LCV_BIO * fi.WtW_BIO
         )
         gfi_new = num_g / total_MJ
-
         t1, t2, ben = tier_costs_usd(gfi_new, total_MJ, year)
         reg_cost = t1 + t2 + ben
         premium_cost = max(bio_new - fi.BIO_t, 0.0) * fi.PREMIUM
         total_cost = reg_cost + premium_cost
         return total_cost, gfi_new, reg_cost, premium_cost, d_sel
 
-    # Candidate fractions
     candidates: List[float] = [0.0, 1.0]
     if abs(s) > 0:
         f_direct = (GFI_DIRECT[year] - G0) / s
-        f_base = (GFI_BASE[year] - G0) / s
-        if 0.0 <= f_direct <= 1.0:
-            candidates.append(float(f_direct))
-        if 0.0 <= f_base <= 1.0:
-            candidates.append(float(f_base))
+        f_base   = (GFI_BASE[year]   - G0) / s
+        if 0.0 <= f_direct <= 1.0: candidates.append(float(f_direct))
+        if 0.0 <= f_base   <= 1.0: candidates.append(float(f_base))
 
     best = None
     for f in candidates:
@@ -279,10 +207,9 @@ def optimize_energy_neutral(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# US-formatted numeric input helpers (commas + exactly two decimals) in SIDEBAR
+# US-formatted numeric helpers (sidebar)
 # ──────────────────────────────────────────────────────────────────────────────
 def _format_state_number(key: str, min_value: float = 0.0) -> None:
-    """Normalize st.session_state[key] to US format with two decimals."""
     s = st.session_state.get(key, "")
     s = (s or "").strip().replace(" ", "").replace(",", "")
     try:
@@ -294,10 +221,6 @@ def _format_state_number(key: str, min_value: float = 0.0) -> None:
     st.session_state[key] = f"{v:,.2f}"
 
 def us_number_input(label: str, default: float, key: str, *, container, min_value: float = 0.0) -> float:
-    """
-    Text input *inside the provided container* (e.g., st.sidebar columns) that shows
-    numbers as US formatted (1,234.56) with 2 decimals, while returning a clean float.
-    """
     if key not in st.session_state:
         st.session_state[key] = f"{float(default):,.2f}"
         st.session_state[f"__prev_{key}"] = float(default)
@@ -308,7 +231,7 @@ def us_number_input(label: str, default: float, key: str, *, container, min_valu
         return max(float(st.session_state.get(f"__prev_{key}", default)), min_value)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Login gate (shared username/password; 14-day trial cookie + separate session cookie)
+# LOGIN GATE — shared username/password with cookie + session fallback
 # ──────────────────────────────────────────────────────────────────────────────
 _cookie_mgr = stx.CookieManager(key="cookie_mgr")
 
@@ -322,42 +245,96 @@ def _get_auth_config():
         "password":       auth.get("password", "1234"),
     }
 
+# ensure the component is mounted once per run (prevents “button does nothing” on some setups)
+try:
+    _ = _cookie_mgr.get_all()
+except Exception:
+    pass
+
+def _cookie_get(name: str):
+    try: return _cookie_mgr.get(name)
+    except Exception: return None
+
+def _cookie_set(name: str, value: str, *, expires_days: int | None = None) -> bool:
+    try:
+        if expires_days is None:
+            _cookie_mgr.set(name, value, key=f"k-{uuid.uuid4()}")
+        else:
+            _cookie_mgr.set(
+                name, value,
+                expires_at=datetime.utcnow() + timedelta(days=expires_days),
+                key=f"k-{uuid.uuid4()}",
+            )
+        return True
+    except Exception:
+        return False
+
+def _cookie_del(name: str) -> bool:
+    try:
+        _cookie_mgr.delete(name); return True
+    except Exception:
+        return False
+
+def _now_utc(): return datetime.now(timezone.utc)
+
 def shared_creds_cookie_gate():
     """
-    • Everyone uses the same username/password (from secrets or defaults).
-    • First successful login on a browser sets TRIAL cookie (expires in N days) – not deleted on logout.
-    • Each login also sets a SESSION cookie (no explicit expires → session). Logout deletes only SESSION.
-    • If TRIAL is expired/absent → you must sign in again; a new TRIAL is started only if absent.
+    • Shared username/password (from secrets or defaults).
+    • First successful login on a browser sets TRIAL cookie (14 days by default) — never deleted on Logout.
+    • SESSION cookie controls the live session; Logout deletes only SESSION (not TRIAL).
+    • Fallback: if cookies are blocked, we still allow login for the current tab via session_state.
+      Logout works and the 14-day window persists only while the tab remains open.
     """
     cfg = _get_auth_config()
-    trial_ck = cfg["trial_cookie"]
-    sess_ck  = cfg["session_cookie"]
-    expiry_days = cfg["expiry_days"]
+    trial_ck = cfg["trial_cookie"]; sess_ck = cfg["session_cookie"]; expiry_days = cfg["expiry_days"]
 
-    # Read cookies
-    trial_tok = _cookie_mgr.get(trial_ck)
-    sess_tok  = _cookie_mgr.get(sess_ck)
+    # Fallback session flags
+    if "_fallback_logged_in" not in st.session_state:
+        st.session_state["_fallback_logged_in"] = False
+    if "_fallback_trial_until" not in st.session_state:
+        st.session_state["_fallback_trial_until"] = None
 
-    # If session is active and trial exists → allow app + show Logout
+    # 1) If SESSION cookie + TRIAL cookie exist → authenticated
+    trial_tok = _cookie_get(trial_ck)
+    sess_tok  = _cookie_get(sess_ck)
     if sess_tok and trial_tok:
         with st.sidebar:
             if st.button("Logout"):
-                try:
-                    _cookie_mgr.delete(sess_ck)  # DO NOT delete trial cookie
-                except Exception:
-                    pass
+                _cookie_del(sess_ck)  # keep trial cookie (preserves countdown)
+                st.session_state["_fallback_logged_in"] = False
+                st.session_state["_fallback_trial_until"] = None
                 st.rerun()
-        return
+        return  # allow app
 
-    # If session cookie exists but trial is gone (expired), clear session and force login
+    # 2) If SESSION cookie exists but TRIAL expired → clear session and force login
     if sess_tok and not trial_tok:
-        try:
-            _cookie_mgr.delete(sess_ck)
-        except Exception:
-            pass
+        _cookie_del(sess_ck)
+        st.session_state["_fallback_logged_in"] = False
+        st.session_state["_fallback_trial_until"] = None
         st.rerun()
 
-    # Show login form
+    # 3) Fallback path: if cookies blocked but we previously logged-in in this tab and trial still valid
+    if st.session_state["_fallback_logged_in"]:
+        tu = st.session_state["_fallback_trial_until"]
+        if isinstance(tu, str):
+            try:
+                tu = datetime.fromisoformat(tu)
+                if tu.tzinfo is None: tu = tu.replace(tzinfo=timezone.utc)
+            except Exception:
+                tu = None
+        if tu and _now_utc() < tu:
+            with st.sidebar:
+                if st.button("Logout"):
+                    st.session_state["_fallback_logged_in"] = False
+                    st.session_state["_fallback_trial_until"] = None
+                    st.rerun()
+            return
+        else:
+            # fallback trial ended → require login
+            st.session_state["_fallback_logged_in"] = False
+            st.session_state["_fallback_trial_until"] = None
+
+    # 4) Show login form
     st.title("Sign in")
     st.write("Enter the temporary credentials to access the app.")
     u = st.text_input("Username")
@@ -367,26 +344,27 @@ def shared_creds_cookie_gate():
     if not submit:
         st.stop()
 
-    # Validate
-    if (u == cfg["username"]) and (p == cfg["password"]):
-        # 1) Ensure TRIAL cookie exists (create only if missing, so countdown is preserved)
-        if not trial_tok:
-            expires_at = datetime.utcnow() + timedelta(days=expiry_days)
-            try:
-                _cookie_mgr.set(trial_ck, str(uuid.uuid4()), expires_at=expires_at, key=f"trial-{uuid.uuid4()}")
-            except Exception:
-                pass  # if cookies blocked, trial won't persist; user can still use current session
-
-        # 2) Set/refresh SESSION cookie (session cookie → no expires)
-        try:
-            _cookie_mgr.set(sess_ck, str(uuid.uuid4()), key=f"sess-{uuid.uuid4()}")
-        except Exception:
-            pass
-
-        st.rerun()
-    else:
+    # 5) Validate
+    if not ((u == cfg["username"]) and (p == cfg["password"])):
         st.error("Invalid credentials.")
         st.stop()
+
+    # 6) On success → ensure TRIAL cookie exists (create only if missing), set SESSION cookie; also set fallback
+    trial_ok = True
+    if not trial_tok:
+        trial_ok = _cookie_set(trial_ck, str(uuid.uuid4()), expires_days=expiry_days)
+
+    sess_ok = _cookie_set(sess_ck, str(uuid.uuid4()))  # session cookie (no explicit expires)
+
+    # Fallback session always set so Sign-in visibly “does something” even if cookies blocked
+    st.session_state["_fallback_logged_in"] = True
+    st.session_state["_fallback_trial_until"] = (
+        (_now_utc() + timedelta(days=expiry_days)).isoformat()
+        if not trial_tok else st.session_state.get("_fallback_trial_until")
+    )
+
+    # Force immediate re-render into the authenticated branch
+    st.rerun()
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Gate
@@ -416,10 +394,8 @@ with st.expander("Methodology & Units", expanded=False):
   - If \(GFI < Direct_y\): \((GFI−Direct_y)\cdot TotalMJ / 10^6\) (negative surplus)
 - **Tier costs default values** \[USD per tCO2eq]: Tier-1 = 100, Tier-2 = 380, Benefit = 190 (when below direct limit)
 - **Optimization (per year)**: reduce **selected fuel (HFO/LFO/MDO-MGO)** by Δt and
-  increase **BIO** (or any other suitable fuel) by Δt·LCV_sel/LCV_BIO (energy-neutral). Objective:
+  increase **BIO** by Δt·LCV_sel/LCV_BIO (energy-neutral). Objective:
   minimize (Tier1 + Tier2 + Benefit + Premium)
-
-**Units**: Mass in tons; LCV in MJ/ton; WtW in gCO₂e/MJ.
 """
     )
 
@@ -428,7 +404,6 @@ states = load_defaults()
 
 # Sidebar inputs (left), US-formatted in place; sidebar widened
 st.sidebar.header("Inputs")
-
 colA, colB = st.sidebar.columns(2)
 HFO_t = us_number_input(f"{CF_LABELS['HFO']} (tons)", float(states.get("HFO_t", 100.0)), key="inp_HFO_t", container=colA)
 LFO_t = us_number_input(f"{CF_LABELS['LFO']} (tons)", float(states.get("LFO_t", 0.0)), key="inp_LFO_t", container=colB)
@@ -460,11 +435,11 @@ reduce_choice = st.sidebar.selectbox(
 # Cost rates inputs (below LCVs, above Premium)
 st.sidebar.markdown("**Cost rates [USD per tCO₂e]**")
 colG, colH, colI = st.sidebar.columns(3)
-TIER1_COST = us_number_input("Tier 1", float(states.get("TIER1_COST", 100.0)), key="inp_TIER1_COST", container=colG, min_value=0.0)
-TIER2_COST = us_number_input("Tier 2", float(states.get("TIER2_COST", 380.0)), key="inp_TIER2_COST", container=colH, min_value=0.0)
+TIER1_COST  = us_number_input("Tier 1", float(states.get("TIER1_COST", 100.0)), key="inp_TIER1_COST", container=colG, min_value=0.0)
+TIER2_COST  = us_number_input("Tier 2", float(states.get("TIER2_COST", 380.0)), key="inp_TIER2_COST", container=colH, min_value=0.0)
 BENEFIT_RATE = us_number_input("Benefit", float(states.get("BENEFIT_RATE", 190.0)), key="inp_BENEFIT_RATE", container=colI, min_value=0.0)
 
-# Premium (placed after cost rates)
+# Premium (after cost rates)
 st.sidebar.markdown("---")
 PREMIUM = us_number_input(
     f"Premium [USD/ton] (Biofuel Cost - {reduce_choice} cost)",
@@ -503,37 +478,26 @@ kpi1, kpi2 = st.columns(2)
 kpi1.metric("GFI (gCO₂e/MJ)", f"{GFI:,.2f}")
 kpi2.metric("Total energy (MJ)", f"{TOTAL_MJ:,.2f}")
 
-# Step-wise targets plot (with unified hover showing all traces)
+# Step-wise targets plot
 X_STEP = YEARS + [YEARS[-1] + 1]
-base_step = [GFI_BASE[y] for y in YEARS] + [GFI_BASE[YEARS[-1]]]
-direct_step = [GFI_DIRECT[y] for y in YEARS] + [GFI_DIRECT[YEARS[-1]]]
-gfi_step = [GFI] * len(X_STEP)
+base_step    = [GFI_BASE[y]   for y in YEARS] + [GFI_BASE[YEARS[-1]]]
+direct_step  = [GFI_DIRECT[y] for y in YEARS] + [GFI_DIRECT[YEARS[-1]]]
+gfi_step     = [GFI] * len(X_STEP)
 baseline_step = [GFI2008] * len(X_STEP)
 
 fig = go.Figure()
-
-# Order traces top→bottom in hover: Baseline (top), GFI attained, Base target, Direct target (bottom)
-fig.add_trace(go.Scatter(
-    x=X_STEP, y=baseline_step, mode="lines", name="Baseline 2008",
-    line=dict(dash="longdash", width=2, color="black"), line_shape="hv",
-    hovertemplate="Baseline 2008: %{y:,.2f} gCO₂e/MJ<extra></extra>"
-))
-fig.add_trace(go.Scatter(
-    x=X_STEP, y=gfi_step, mode="lines", name="GFI attained",
-    line=dict(width=2), line_shape="hv",
-    hovertemplate="GFI attained: %{y:,.2f} gCO₂e/MJ<extra></extra>"
-))
-fig.add_trace(go.Scatter(
-    x=X_STEP, y=base_step, mode="lines", name="Base target (step)",
-    line=dict(dash="dash", width=2), line_shape="hv",
-    hovertemplate="Base target: %{y:,.2f} gCO₂e/MJ<extra></extra>"
-))
-fig.add_trace(go.Scatter(
-    x=X_STEP, y=direct_step, mode="lines", name="Direct target (step)",
-    line=dict(dash="dot", width=2), line_shape="hv",
-    hovertemplate="Direct target: %{y:,.2f} gCO₂e/MJ<extra></extra>"
-))
-
+fig.add_trace(go.Scatter(x=X_STEP, y=baseline_step, mode="lines", name="Baseline 2008",
+                         line=dict(dash="longdash", width=2, color="black"), line_shape="hv",
+                         hovertemplate="Baseline 2008: %{y:,.2f} gCO₂e/MJ<extra></extra>"))
+fig.add_trace(go.Scatter(x=X_STEP, y=gfi_step, mode="lines", name="GFI attained",
+                         line=dict(width=2), line_shape="hv",
+                         hovertemplate="GFI attained: %{y:,.2f} gCO₂e/MJ<extra></extra>"))
+fig.add_trace(go.Scatter(x=X_STEP, y=base_step, mode="lines", name="Base target (step)",
+                         line=dict(dash="dash", width=2), line_shape="hv",
+                         hovertemplate="Base target: %{y:,.2f} gCO₂e/MJ<extra></extra>"))
+fig.add_trace(go.Scatter(x=X_STEP, y=direct_step, mode="lines", name="Direct target (step)",
+                         line=dict(dash="dot", width=2), line_shape="hv",
+                         hovertemplate="Direct target: %{y:,.2f} gCO₂e/MJ<extra></extra>"))
 fig.update_layout(
     height=380,  # taller for clearer separation
     margin=dict(l=6, r=6, t=26, b=4),
@@ -552,8 +516,6 @@ st.plotly_chart(fig, use_container_width=True)
 # Per-year calculations & optimization (deltas reported)
 # ──────────────────────────────────────────────────────────────────────────────
 rows: List[Dict] = []
-
-# Dynamic reduction column name
 if reduce_choice == "HFO":
     red_col_name = "HFO_Reduction_For_Opt_Cost_t"
 elif reduce_choice == "LFO":
@@ -573,7 +535,7 @@ for yr in YEARS:
         sel_red_t, bio_inc_t, gfi_new, reg_cost_opt, premium_cost_opt = optimize_energy_neutral(
             fi, yr, reduce_fuel=reduce_choice
         )
-        tot_cost_opt = reg_cost_opt + premium_cost_opt  # final optimized cost
+        tot_cost_opt = reg_cost_opt + premium_cost_opt
 
     rows.append({
         "Year": yr,
@@ -582,33 +544,23 @@ for yr in YEARS:
         "GFI_Tier_1_Cost_USD": t1_usd,
         "GFI_Tier_2_Cost_USD": t2_usd,
         "GFI_Benefit_USD": ben_usd,
-        # Regulatory, Premium, Total based on INITIAL values
         "Regulatory_Cost_USD": t1_usd + t2_usd + ben_usd,
         "Premium_Fuel_Cost_USD": PREMIUM * BIO_t,
         "Total_Cost_USD": (t1_usd + t2_usd + ben_usd) + (PREMIUM * BIO_t),
-        # Optimization outputs
         "Total_Cost_USD_Opt": tot_cost_opt,
         red_col_name: sel_red_t,
         "Bio_Fuel_Increase_For_Opt_Cost_t": bio_inc_t,
     })
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Per-year results table (place Total_Cost_USD_Opt at the END)
+# Results table
 # ──────────────────────────────────────────────────────────────────────────────
 res_df = pd.DataFrame(rows)
 res_df = res_df[[
-    "Year",
-    "GFI (g/MJ)",
-    "GFI_Deficit_Surplus_tCO2eq",
-    "GFI_Tier_1_Cost_USD",
-    "GFI_Tier_2_Cost_USD",
-    "GFI_Benefit_USD",
-    "Regulatory_Cost_USD",
-    "Premium_Fuel_Cost_USD",
-    "Total_Cost_USD",
-    red_col_name,
-    "Bio_Fuel_Increase_For_Opt_Cost_t",
-    "Total_Cost_USD_Opt",  # last
+    "Year","GFI (g/MJ)","GFI_Deficit_Surplus_tCO2eq",
+    "GFI_Tier_1_Cost_USD","GFI_Tier_2_Cost_USD","GFI_Benefit_USD",
+    "Regulatory_Cost_USD","Premium_Fuel_Cost_USD","Total_Cost_USD",
+    red_col_name,"Bio_Fuel_Increase_For_Opt_Cost_t","Total_Cost_USD_Opt"
 ]]
 
 st.subheader("Per-Year Results (2028–2035)")
@@ -630,7 +582,7 @@ st.dataframe(
 )
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Compact bar charts (requested order)
+# Compact bar charts
 # ──────────────────────────────────────────────────────────────────────────────
 def bar_chart(title: str, ycol: str):
     fmt_map = {
@@ -644,60 +596,34 @@ def bar_chart(title: str, ycol: str):
         "GFI_Benefit_USD": ",.2f",
     }
     textfmt = fmt_map.get(ycol, ",.2f")
-
     figb = px.bar(res_df, x="Year", y=ycol, title=title, text=ycol)
-    figb.update_traces(
-        texttemplate=f"%{{text:{textfmt}}}",
-        textposition="outside",
-        cliponaxis=False,
-        outsidetextfont=dict(size=13, family="Arial Black")
-    )
+    figb.update_traces(texttemplate=f"%{{text:{textfmt}}}", textposition="outside",
+                       cliponaxis=False, outsidetextfont=dict(size=13, family="Arial Black"))
     figb.update_layout(
-        height=210,
-        margin=dict(l=4, r=4, t=24, b=4),
-        bargap=0.15,
-        bargroupgap=0.05,
-        showlegend=False,
-        xaxis=dict(tickmode="array", tickvals=YEARS, tickfont=dict(size=10)),
-        yaxis=dict(title=None, tickfont=dict(size=10)),
-        uniformtext_minsize=9,
-        uniformtext_mode="hide"
+        height=210, margin=dict(l=4, r=4, t=24, b=4), bargap=0.15, bargroupgap=0.05,
+        showlegend=False, xaxis=dict(tickmode="array", tickvals=YEARS, tickfont=dict(size=10)),
+        yaxis=dict(title=None, tickfont=dict(size=10)), uniformtext_minsize=9, uniformtext_mode="hide"
     )
     figb.update_yaxes(tickformat=",.2f")
-
     yvals = res_df[ycol].astype(float)
     if not yvals.empty:
-        ymax = float(yvals.max())
-        ymin = float(yvals.min())
+        ymax, ymin = float(yvals.max()), float(yvals.min())
         pad_up = 0.10 * abs(ymax) if ymax != 0 else 1.0
         pad_dn = 0.10 * abs(ymin) if ymin != 0 else 0.0
         if ymax != ymin:
             figb.update_yaxes(range=[ymin - pad_dn, ymax + pad_up])
-
     st.plotly_chart(figb, use_container_width=True)
 
-# Core charts in two-column rows
 c1, c2 = st.columns(2)
-with c1:
-    bar_chart("GFI Deficit/Surplus [tCO₂e]", "GFI_Deficit_Surplus_tCO2eq")
-with c2:
-    bar_chart("Regulatory Cost [USD]", "Regulatory_Cost_USD")
-
+with c1: bar_chart("GFI Deficit/Surplus [tCO₂e]", "GFI_Deficit_Surplus_tCO2eq")
+with c2: bar_chart("Regulatory Cost [USD]", "Regulatory_Cost_USD")
 c3, c4 = st.columns(2)
-with c3:
-    bar_chart("Premium Fuel Cost [USD]", "Premium_Fuel_Cost_USD")
-with c4:
-    bar_chart("Tier 1 Cost [USD]", "GFI_Tier_1_Cost_USD")
-
+with c3: bar_chart("Premium Fuel Cost [USD]", "Premium_Fuel_Cost_USD")
+with c4: bar_chart("Tier 1 Cost [USD]", "GFI_Tier_1_Cost_USD")
 c5, c6 = st.columns(2)
-with c5:
-    bar_chart("Tier 2 Cost [USD]", "GFI_Tier_2_Cost_USD")
-
-# Totals at the end (above Benefit)
+with c5: bar_chart("Tier 2 Cost [USD]", "GFI_Tier_2_Cost_USD")
 bar_chart("Total Cost [USD]", "Total_Cost_USD")
 bar_chart("Total Cost (Optimized) [USD]", "Total_Cost_USD_Opt")
-
-# Benefit last
 bar_chart("Benefit [USD] (negative = credit)", "GFI_Benefit_USD")
 
 # ──────────────────────────────────────────────────────────────────────────────
