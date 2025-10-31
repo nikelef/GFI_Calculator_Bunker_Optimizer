@@ -420,7 +420,7 @@ with st.expander("Methodology & Units", expanded=False):
     # Optimization (show Δt sentence and objective with proper math)
     st.markdown("**Optimization (per year)**")
     st.markdown(
-    r"Reduce the selected fossil (HFO/LFO/MDO-MGO) by [Δt] (voyage first, then berth), and increase BIO energy-equivalently:"
+    r"Reduce the selected fossil (HFO/LFO/MDO-MGO) by [Δt] and increase BIO energy-equivalently:"
     )
     st.latex(
         r"\Delta m_{\text{BIO}}=\Delta t\cdot\frac{\mathrm{LCV}_{\text{sel}}}{\mathrm{LCV}_{\text{BIO}}}"
