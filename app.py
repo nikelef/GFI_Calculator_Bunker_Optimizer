@@ -18,7 +18,15 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 import streamlit as st
+# Add custom CSS to hide the GitHub icon
+hide_github_icon = """
+#GithubIcon {
+  visibility: hidden;
+}
+"""
+st.markdown(hide_github_icon, unsafe_allow_html=True)
 
+# Your app code goes here
 # ↓↓↓ hardened shared-credentials login (cookie + session fallback)
 from datetime import datetime, timedelta, timezone
 import uuid
