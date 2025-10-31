@@ -700,6 +700,6 @@ st.download_button(
 )
 
 #st.caption("© 2025 — Single-vessel GFI optimizer. Initial costs shown; optimization reports deltas and Total_Cost_USD_Opt.")
-st.info("Public trial — non-production. Results are informational; no warranty.", icon="ℹ️")
+st.info("Public Demo — non-production. Results are informational; no warranty.", icon="ℹ️")
 show_trial_footer("Nikitas Eleftheriou", "1.0", "2025-10-30")
 st.caption("Built with Streamlit • Hosting on Streamlit Community Cloud. By using this app you also accept Streamlit’s Terms and Privacy.")
