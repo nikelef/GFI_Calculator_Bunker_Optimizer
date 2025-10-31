@@ -33,6 +33,28 @@ import extra_streamlit_components as stx
 # ──────────────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="IMO GFI Calculator - Bunkers Optimizer", layout="wide")
 
+#******************
+
+import streamlit as st
+
+st.markdown("""
+<style>
+/* Hide the entire top-right toolbar (menu, rerun, GitHub link) */
+[data-testid="stToolbar"] { visibility: hidden; height: 0; position: fixed; }
+
+/* Hide the “Open in GitHub / Fork this app” badge (class names can vary by version) */
+div[class^="viewerBadge_"],
+div[class*=" viewerBadge_"] { display: none !important; }
+
+/* Optional: remove header/decoration space for a cleaner top edge */
+[data-testid="stDecoration"], [data-testid="header"] { display: none; }
+</style>
+""", unsafe_allow_html=True)
+
+
+#*******************
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Constants (defaults)
 # ──────────────────────────────────────────────────────────────────────────────
