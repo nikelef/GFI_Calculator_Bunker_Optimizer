@@ -25,7 +25,7 @@ from datetime import datetime, timedelta, timezone
 import uuid
 import extra_streamlit_components as stx
 
-#MainMenu {
+MainMenu {
   visibility: hidden;
 }
 
